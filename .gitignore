@@ -1,0 +1,20 @@
+node_modules/
+dist/
+packages/relay/public/
+packages/relay/dist/
+*.log
+.DS_Store
+.data/
+.env
+coverage/
+.tmp/
+
+# Android (Capacitor) generated artefacts
+android/app/src/main/assets/public/
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/.idea/

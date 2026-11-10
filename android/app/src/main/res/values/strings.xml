@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MeshChat</string>
+    <string name="title_activity_main">MeshChat</string>
+    <string name="package_name">chat.mesh.app</string>
+    <string name="custom_url_scheme">chat.mesh.app</string>
+</resources>

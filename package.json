@@ -1,0 +1,53 @@
+{
+  "name": "meshchat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Anonymous, end-to-end encrypted, multi-transport messenger. Runs in the browser, as a PWA, on Linux, Windows and Android.",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "build": "npm run build:app && npm run build:relay",
+    "build:app": "vite build",
+    "build:relay": "node scripts/build-relay.mjs",
+    "start": "node packages/relay/dist/relay.mjs",
+    "relay": "tsx packages/relay/src/main.ts",
+    "dev": "vite",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit",
+    "git:init": "node scripts/git-mailbox-init.mjs",
+    "cap:sync": "npm run build && npx cap sync android",
+    "apk": "npm run build && npx cap sync android && cd android && ./gradlew assembleDebug",
+    "start:data": "node packages/relay/dist/relay.mjs --data .data"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.6.0",
+    "libsodium-wrappers-sumo": "0.7.15",
+    "qrcode": "1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/libsodium-wrappers-sumo": "0.7.8",
+    "@types/node": "22.10.1",
+    "@types/qrcode": "1.5.5",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@types/ws": "8.5.13",
+    "@vitejs/plugin-react": "4.3.4",
+    "esbuild": "0.24.0",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^25.0.1",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

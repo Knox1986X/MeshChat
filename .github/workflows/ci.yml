@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Tests (crypto · ratchet · end-to-end over a real relay · UI)
+        run: npm test
+      - name: Build UI and relay bundle
+        run: npm run build
+      - name: Bundle size report
+        run: du -sh packages/relay/public packages/relay/dist/relay.mjs
+      - uses: actions/upload-artifact@v4
+        if: matrix.node == 22
+        with:
+          name: meshchat-web
+          path: packages/relay/public
+          retention-days: 7

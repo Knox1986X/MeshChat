@@ -1,0 +1,28 @@
+services:
+  meshchat:
+    build: .
+    image: meshchat:latest
+    container_name: meshchat
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - meshchat-data:/data
+    environment:
+      MESHCHAT_NAME: "meshchat-relay"
+      MESHCHAT_POW: "16"          # proof-of-work difficulty, 0 = off
+      MESHCHAT_TTL_DAYS: "7"      # how long undelivered envelopes are kept
+      MESHCHAT_RATE_LIMIT: "240"  # requests per minute per IP
+      MESHCHAT_LOG: "0"           # never log IPs unless you really mean it
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/v1/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  meshchat-data:

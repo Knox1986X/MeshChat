@@ -1,0 +1,10 @@
+node_modules
+packages/relay/public
+packages/relay/dist
+android
+.git
+.data
+.tmp
+coverage
+*.log
+docs

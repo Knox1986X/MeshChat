@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["packages/core/src/**/*.ts", "packages/relay/src/**/*.ts", "packages/app/src/**/*.ts", "packages/app/src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "capacitor.config.ts"]
+}
