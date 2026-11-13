@@ -19,7 +19,13 @@ import {
   logoutAndWipeDevice,
   showToast,
 } from '../store/app-store.mjs';
-import { Icon } from './boss-screen.mjs';
+import {
+  Icon,
+  AvatarBox,
+  ProfileBadgeIcon,
+  AmbientParticles,
+} from './boss-screen.mjs';
+import { resolveBannerStyle } from './profile-view.mjs';
 
 const POLICY_OPTIONS = [
   {
@@ -98,6 +104,9 @@ export function ModalLayer() {
   }
   if (ui.modal === 'safety') {
     return html`<${SafetyModal} data=${ui.modalData} />`;
+  }
+  if (ui.modal === 'peer-profile') {
+    return html`<${PeerProfileModal} data=${ui.modalData} />`;
   }
   if (ui.modal === 'settings') {
     return html`<${SettingsModal} />`;
@@ -183,6 +192,82 @@ function NewChatModal() {
         </button>
       </div>
     </form>
+  </div>`;
+}
+
+function PeerProfileModal({ data }) {
+  if (!data?.chat) return null;
+  const { chatId, chat, safetyNumber } = data;
+  const pp = chat.peerProfile || {};
+  const displayTitle = pp.displayName || chat.title;
+  const badge = pp.badge || (chat.verified ? 'verified' : 'none');
+
+  return html`<div class="modal-backdrop" onClick=${closeModal}>
+    <div class="modal-card profile-sheet-card" onClick=${(e) => e.stopPropagation()}>
+      <div class="custom-profile-hero compact" style=${`background:${resolveBannerStyle(pp)}`}>
+        <${AmbientParticles} effect=${pp.particles || 'stars'} />
+        <div class="profile-hero-top-actions">
+          <span class="hero-tag-chip">${chat.verified ? 'КЛЮЧ ПОДТВЕРЖДЁН' : 'КОНТАКТ E2EE'}</span>
+          <button type="button" class="icon-btn small" onClick=${closeModal}>
+            <${Icon} name="close" size=${15} />
+          </button>
+        </div>
+
+        <div class="profile-avatar-stage">
+          ${pp.statusText && html`<div class="profile-thought-bubble"><span>${pp.statusText}</span></div>`}
+          <div class="profile-avatar-ring">
+            <${AvatarBox}
+              title=${displayTitle}
+              username=${chat.username}
+              avatarDataUrl=${pp.avatarDataUrl || ''}
+              color=${chat.avatarColor || '#3B4CCA'}
+              size=${88}
+            />
+          </div>
+        </div>
+
+        <div class="profile-identity-center">
+          <div class="profile-display-name-row">
+            <h2>${displayTitle}</h2>
+            <${ProfileBadgeIcon} badge=${badge} size=${15} />
+          </div>
+          <div class="profile-sub-status">@${chat.username}</div>
+        </div>
+      </div>
+
+      <div class="profile-sheet-body">
+        ${pp.bio && html`<div class="profile-info-item">
+          <div class="info-item-main">
+            <div class="info-item-val">${pp.bio}</div>
+            <div class="info-item-lbl">О собеседнике (расшифровано E2EE)</div>
+          </div>
+        </div>`}
+
+        ${safetyNumber?.hexBlocks?.length > 0 && html`<div class="profile-safety-box">
+          <div class="safety-section-caption">ОТПЕЧАТОК КЛЮЧЕЙ SHA-512</div>
+          <div class="safety-hex-grid">
+            ${safetyNumber.hexBlocks.map((b) => html`<code>${b}</code>`)}
+          </div>
+        </div>`}
+
+        <div class="modal-actions">
+          <button
+            type="button"
+            class="btn-ghost"
+            onClick=${() => {
+              store.ui.modal = 'call';
+              store.ui.modalData = { chat };
+              notifyStore();
+            }}
+          ><${Icon} name="phone" size=${15} /> Звонок P2P</button>
+          <button
+            type="button"
+            class="btn-primary"
+            onClick=${() => markPeerVerified(chatId, !chat.verified)}
+          >${chat.verified ? 'Снять верификацию' : 'Подтвердить ключ'}</button>
+        </div>
+      </div>
+    </div>
   </div>`;
 }
 

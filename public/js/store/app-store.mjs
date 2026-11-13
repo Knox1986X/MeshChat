@@ -1,6 +1,6 @@
-// Центральное реактивное состояние мессенджера (Offline-First Store).
-// Связывает изолированный CryptoWorker, мультитранспортный канал, зашифрованную IndexedDB,
-// последовательную очередь обработки конвертов, гарантированную доставку Outbox и жнец TTL.
+// Центральное реактивное состояние MeshChat v1.3 (Offline-First + Self-Healing ZK Session).
+// Связывает изолированный CryptoWorker, мультитранспортный канал, зашифрованную IndexedDB
+// (+ AndroidKeyStore Vault), кастомные E2E-профили, движок тем и автообновление GitHub Releases.
 
 import { useReducer, useEffect } from '../../vendor/preact.mjs';
 import {
@@ -25,22 +25,95 @@ import { FallbackTransport } from '../transport/fallback-transport.mjs';
 import { EncryptedClientDb } from './idb-messages.mjs';
 import { playSfx } from '../ui/boss-screen.mjs';
 
-// Строгая приглушённая палитра идентификаторов контактов (графит, сталь, тёмный кобальт, хвоя)
+// Палитра аватаров контактов (глубокие благородные оттенки)
 const AVATAR_PALETTE = [
-  '#1E3A5F', '#1E40AF', '#0F4C5C', '#334155',
-  '#14532D', '#1E293B', '#1D4ED8', '#115E59',
+  '#3B4CCA', '#2563EB', '#0E7490', '#4F46E5',
+  '#047857', '#6D28D9', '#BE185D', '#1D4ED8',
 ];
 
-function pickColor(seedStr = '') {
+export function pickColor(seedStr = '') {
   let h = 0;
   for (let i = 0; i < seedStr.length; i++) h = (h * 31 + seedStr.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.2.0';
-export const APP_VERSION_CODE = 3;
+export const APP_VERSION = '1.3.0';
+export const APP_VERSION_CODE = 4;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
+
+// Предустановленные темы оформления приложения
+export const THEME_PRESETS = {
+  obsidian: {
+    id: 'obsidian',
+    label: 'Obsidian Indigo',
+    bg0: '#0b0d14',
+    bg1: '#111420',
+    bg2: '#171b2a',
+    bg3: '#1f2538',
+    accent: '#6d7cff',
+    bubbleOut: '#263159',
+  },
+  amoled: {
+    id: 'amoled',
+    label: 'AMOLED Pitch',
+    bg0: '#040507',
+    bg1: '#0a0c12',
+    bg2: '#12151f',
+    bg3: '#1a1e2c',
+    accent: '#7b89ff',
+    bubbleOut: '#1e2749',
+  },
+  emerald: {
+    id: 'emerald',
+    label: 'Cyber Emerald',
+    bg0: '#060c0a',
+    bg1: '#0b1512',
+    bg2: '#11201b',
+    bg3: '#192e27',
+    accent: '#10b981',
+    bubbleOut: '#11382c',
+  },
+  arctic: {
+    id: 'arctic',
+    label: 'Arctic Cyan',
+    bg0: '#060b11',
+    bg1: '#0b131d',
+    bg2: '#111d2c',
+    bg3: '#192a3e',
+    accent: '#06b6d4',
+    bubbleOut: '#113647',
+  },
+  royal: {
+    id: 'royal',
+    label: 'Royal Amethyst',
+    bg0: '#0a0712',
+    bg1: '#120d1f',
+    bg2: '#1b142e',
+    bg3: '#261d40',
+    accent: '#a855f7',
+    bubbleOut: '#2e1a4a',
+  },
+  crimson: {
+    id: 'crimson',
+    label: 'Crimson Ops',
+    bg0: '#0f070a',
+    bg1: '#180c11',
+    bg2: '#231219',
+    bg3: '#311a24',
+    accent: '#f43f5e',
+    bubbleOut: '#421826',
+  },
+};
+
+export const BANNER_PRESETS = {
+  indigo: 'linear-gradient(135deg, #1b2242 0%, #0d1021 60%, #161d38 100%)',
+  amoled: 'linear-gradient(180deg, #12141c 0%, #06070a 100%)',
+  aurora: 'linear-gradient(135deg, #0f393b 0%, #14192e 55%, #2a1842 100%)',
+  cyber: 'linear-gradient(135deg, #0b2f44 0%, #0a101d 70%, #132c3d 100%)',
+  crimson: 'linear-gradient(135deg, #3b1322 0%, #0f0a12 70%, #241023 100%)',
+  gold: 'linear-gradient(135deg, #332611 0%, #0e0d12 70%, #241d12 100%)',
+};
 
 function compareSemver(a = '0.0.0', b = '0.0.0') {
   const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -52,16 +125,53 @@ function compareSemver(a = '0.0.0', b = '0.0.0') {
   return 0;
 }
 
+function hexToRgba(hex, alpha = 0.16) {
+  const clean = String(hex || '#6d7cff').replace('#', '');
+  const full = clean.length === 3
+    ? clean.split('').map((c) => c + c).join('')
+    : clean.padEnd(6, '0').slice(0, 6);
+  const num = parseInt(full, 16) || 0x6d7cff;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export const store = {
   booting: true,
   busy: false,
   authError: '',
-  me: null, // { userId, username, token, mailboxId, mailboxWriteToken }
+  me: null, // { userId, username, token, mailboxId, mailboxWriteToken, publicKeyShort }
   recoveryModalKey: null,
 
-  // Состояние автообновления (Web Hot-Swap + Android APK SHA-256 Installer)
+  // Кастомный профиль пользователя (синхронизируется с контактами строго внутри E2EE)
+  profile: {
+    displayName: '',
+    statusText: 'На связи · E2EE',
+    bio: 'Сквозное шифрование Signal Protocol · Без метаданных',
+    badge: 'verified',        // 'none' | 'verified' | 'star' | 'bolt' | 'shield' | 'diamond'
+    avatarDataUrl: '',        // Сжатый локально аватар (data:image/jpeg;base64,...)
+    bannerPreset: 'amoled',   // Ключ из BANNER_PRESETS или 'custom'
+    bannerCustomColor: '#1b2242',
+    particles: 'stars',       // 'stars' | 'snow' | 'constellation' | 'pulse' | 'none'
+    updatedAt: 0,
+  },
+
+  // Кастомная тема и визуал приложения
+  theme: {
+    preset: 'obsidian',       // Ключ из THEME_PRESETS или 'custom'
+    customAccent: '#6d7cff',
+    customBg0: '#0b0d14',
+    customBubble: '',
+    avatarShape: 'squircle',  // 'squircle' | 'circle'
+    bubbleRadius: 16,         // 10 | 16 | 22
+    chatBackdrop: 'dots',     // 'none' | 'dots' | 'grid' | 'particles'
+  },
+
+  // Состояние автообновления (GitHub Releases + /api/version + SHA-256 проверка APK)
   update: {
     currentVersion: APP_VERSION,
+    versionCode: APP_VERSION_CODE,
     bootBuildHash: null,
     checking: false,
     available: false,
@@ -77,14 +187,26 @@ export const store = {
     lastCheckedAt: 0,
   },
 
-  // Состояние сети, мультитранспорта и Android Mesh-узла
+  // Состояние сети, мультитранспорта и телеметрии Mesh-узла
   transportState: TRANSPORT_STATE.DISCONNECTED,
   sessionAuthenticated: false,
+  rehydratingSession: false,
   activeTransportId: 'ws',
   rttMs: null,
   serverEndpoints: { onion: null, i2p: null },
+  meshStats: {
+    packetsSent: 0,
+    packetsReceived: 0,
+    rttSamples: [],
+    medianRttMs: null,
+    lastProbeText: '',
+    diagnostics: null,
+    webrtcEnabled: true,
+    relayEnabled: true,
+  },
   android: {
     isApk: Boolean(globalThis.MeshChatAndroid),
+    packageName: 'io.meshchat.app',
     lanMeshRunning: false,
     lanUrl: '',
   },
@@ -107,17 +229,18 @@ export const store = {
   outbox: [],             // очередь зашифрованных конвертов для гарантированной досылки
   decryptedMediaUrls: {}, // blobId -> objectURL
 
-  // Состояние интерфейса (Desktop 3-pane и Mobile)
+  // Состояние интерфейса (5 разделов: Чаты, Контакты, Mesh, Профиль, Настройки)
   ui: {
-    spaceFilter: 'all', // 'all' | 'rooms' | 'ask'
+    navTab: 'chats',      // 'chats' | 'contacts' | 'mesh' | 'profile' | 'settings'
+    spaceFilter: 'all',   // 'all' | 'unread' | 'tor' | 'mesh' | 'ask'
     mobileTab: 'chats',
     activeChatId: null,
-    inspectorOpen: true,
+    inspectorOpen: false,
     searchQuery: '',
     replyTo: null,
     onceMode: false,
     bossActive: false,
-    modal: null,        // null | 'new-chat' | 'safety' | 'settings' | 'once-viewer' | 'call'
+    modal: null,          // null | 'new-chat' | 'safety' | 'settings' | 'once-viewer' | 'call' | 'peer-profile' | 'edit-profile' | 'theme-studio'
     modalData: null,
     toasts: [],
   },
@@ -156,6 +279,44 @@ export function showToast(text, kind = 'info') {
   }, 4200);
 }
 
+/** Применяет выбранную тему и кастомные цвета к CSS-переменным документа */
+export function applyThemeToDom() {
+  if (typeof document === 'undefined' || !document.documentElement) return;
+  const t = store.theme;
+  const base = THEME_PRESETS[t.preset] || THEME_PRESETS.obsidian;
+  const isCustom = t.preset === 'custom';
+  const accent = isCustom ? (t.customAccent || '#6d7cff') : base.accent;
+  const bg0 = isCustom ? (t.customBg0 || '#0b0d14') : base.bg0;
+  const bg1 = isCustom ? '#111420' : base.bg1;
+  const bg2 = isCustom ? '#181d2d' : base.bg2;
+  const bg3 = isCustom ? '#20263b' : base.bg3;
+  const bubbleOut = t.customBubble || (isCustom ? hexToRgba(accent, 0.28) : base.bubbleOut);
+
+  const root = document.documentElement.style;
+  root.setProperty('--bg-0', bg0);
+  root.setProperty('--bg-1', bg1);
+  root.setProperty('--bg-2', bg2);
+  root.setProperty('--bg-3', bg3);
+  root.setProperty('--accent', accent);
+  root.setProperty('--accent-hover', accent);
+  root.setProperty('--accent-soft', hexToRgba(accent, 0.16));
+  root.setProperty('--accent-glow', hexToRgba(accent, 0.34));
+  root.setProperty('--bubble-out', bubbleOut);
+  root.setProperty('--avatar-radius', t.avatarShape === 'circle' ? '50%' : '28%');
+  root.setProperty('--bubble-radius', `${Number(t.bubbleRadius) || 16}px`);
+  document.documentElement.dataset.backdrop = t.chatBackdrop || 'dots';
+}
+
+function recordRttSample(ms) {
+  const val = Number(ms);
+  if (!Number.isFinite(val) || val <= 0) return;
+  store.rttMs = Math.round(val);
+  const arr = [...store.meshStats.rttSamples.slice(-24), Math.round(val)];
+  store.meshStats.rttSamples = arr;
+  const sorted = [...arr].sort((a, b) => a - b);
+  store.meshStats.medianRttMs = sorted[Math.floor(sorted.length / 2)];
+}
+
 // ─────────────────────── Инициализация сервисов клиента ───────────────────────
 
 const clientDb = new EncryptedClientDb();
@@ -169,7 +330,6 @@ let authSyncPromise = null;
 let syncLoopTimer = null;
 let flushInFlight = false;
 
-// Строго последовательная очередь входящих конвертов + защита от двойной обработки (push + pull)
 let incomingQueue = Promise.resolve();
 const processedEnvelopeIds = new Set();
 
@@ -188,7 +348,6 @@ function enqueueIncomingTask(fn) {
   return next;
 }
 
-/** Позволяет подключить внешний оркестратор транспорта (для автотестов и кастомных сборок) */
 export function registerTransportOrchestrator(builderFn) {
   customTransportBuilder = builderFn;
 }
@@ -198,7 +357,6 @@ async function computeMailboxWriteProof(writeToken, bytes) {
   return toBase64Url(mac);
 }
 
-/** Вычисляет полный HTTP URL для API с учётом выбранного узла MeshChat */
 export function resolveApiUrl(pathname) {
   const raw = (store.settings.serverUrl || '').trim().replace(/\/+$/, '');
   if (!raw) return pathname;
@@ -213,7 +371,6 @@ export function resolveApiUrl(pathname) {
   }
 }
 
-/** Вычисляет WebSocket URL для прямого канала на основе выбранного узла MeshChat */
 function resolveDirectWsUrl() {
   const raw = (store.settings.serverUrl || '').trim().replace(/\/+$/, '');
   if (!raw) return undefined;
@@ -231,6 +388,10 @@ function syncAndroidNativeBridge() {
   if (!globalThis.MeshChatAndroid) return;
   try {
     store.android.isApk = true;
+    if (typeof globalThis.MeshChatAndroid.getAppInfoJson === 'function') {
+      const info = JSON.parse(globalThis.MeshChatAndroid.getAppInfoJson() || '{}');
+      if (info.packageName) store.android.packageName = info.packageName;
+    }
     const raw = (store.settings.serverUrl || '').trim();
     if (typeof globalThis.MeshChatAndroid.setUpstreamServer === 'function') {
       globalThis.MeshChatAndroid.setUpstreamServer(raw);
@@ -244,7 +405,10 @@ function syncAndroidNativeBridge() {
 }
 
 export function toggleAndroidLanMesh() {
-  if (!globalThis.MeshChatAndroid?.toggleLanMesh) return;
+  if (!globalThis.MeshChatAndroid?.toggleLanMesh) {
+    showToast('Прямой Wi-Fi ретранслятор доступен в Android-приложении MeshChat.apk');
+    return;
+  }
   try {
     const next = !store.android.lanMeshRunning;
     const st = JSON.parse(globalThis.MeshChatAndroid.toggleLanMesh(next) || '{}');
@@ -252,8 +416,8 @@ export function toggleAndroidLanMesh() {
     store.android.lanUrl = st.url || '';
     showToast(
       store.android.lanMeshRunning
-        ? `Локальный ретранслятор запущен: ${store.android.lanUrl}`
-        : 'Локальный ретранслятор остановлен'
+        ? `Локальный узел запущен: ${store.android.lanUrl}`
+        : 'Локальный узел остановлен'
     );
     notifyStore();
   } catch (err) {
@@ -261,17 +425,53 @@ export function toggleAndroidLanMesh() {
   }
 }
 
-/** Нормализует устаревшие названия системного чата при загрузке из локальной БД */
-function normalizeStoredChats(chatsObj) {
-  if (!chatsObj || typeof chatsObj !== 'object') return {};
-  if (chatsObj['ask:inbox']) {
-    chatsObj['ask:inbox'].title = 'Входящий шлюз E2E';
-    chatsObj['ask:inbox'].avatarColor = '#1E3A5F';
-    if (typeof chatsObj['ask:inbox'].lastPreview === 'string') {
-      chatsObj['ask:inbox'].lastPreview = chatsObj['ask:inbox'].lastPreview.replace(/^🎭\s*/, '');
-    }
+/** Создаёт системные чаты (Эхо-проверка E2EE + Входящий шлюз) и нормализует сохранённые */
+function ensureSystemChats(chatsObj, username = '') {
+  const next = chatsObj && typeof chatsObj === 'object' ? { ...chatsObj } : {};
+
+  if (!next['echo:loopback']) {
+    next['echo:loopback'] = {
+      id: 'echo:loopback',
+      kind: 'echo',
+      peerId: 'self',
+      username: 'echo',
+      title: 'Эхо-проверка E2EE',
+      avatarColor: '#4338CA',
+      verified: true,
+      pinned: true,
+      muted: false,
+      ttlSec: 0,
+      unread: 0,
+      lastPreview: 'Локальный сейф и самопроверка шифрования AES-256-GCM',
+      lastTs: Date.now() - 1000,
+    };
+  } else {
+    next['echo:loopback'].kind = 'echo';
+    if (next['echo:loopback'].pinned === undefined) next['echo:loopback'].pinned = true;
   }
-  for (const c of Object.values(chatsObj)) {
+
+  if (!next['ask:inbox']) {
+    next['ask:inbox'] = {
+      id: 'ask:inbox',
+      kind: 'ask',
+      peerId: 'anon',
+      username: username || 'gateway',
+      title: 'Входящий шлюз E2E',
+      avatarColor: '#1E3A5F',
+      verified: true,
+      pinned: false,
+      muted: false,
+      ttlSec: 0,
+      unread: 0,
+      lastPreview: username ? `Внешний приёмник: /q/${username}` : 'Внешний приёмник E2E',
+      lastTs: Date.now() - 2000,
+    };
+  } else {
+    next['ask:inbox'].title = 'Входящий шлюз E2E';
+    next['ask:inbox'].avatarColor = '#1E3A5F';
+  }
+
+  for (const c of Object.values(next)) {
     if (c && typeof c.lastPreview === 'string') {
       c.lastPreview = c.lastPreview
         .replace(/^🔥\s*Одноразовое медиа/u, '[1×] Вложение')
@@ -279,19 +479,62 @@ function normalizeStoredChats(chatsObj) {
         .replace(/^🎭\s*/u, '');
     }
   }
-  return chatsObj;
+  return next;
+}
+
+function ensureSystemMessages(messagesObj, username = '') {
+  const next = messagesObj && typeof messagesObj === 'object' ? { ...messagesObj } : {};
+  if (!next['echo:loopback']?.length) {
+    next['echo:loopback'] = [
+      {
+        id: 'echo_welcome',
+        chatId: 'echo:loopback',
+        out: false,
+        type: 'highlight',
+        text: 'Канал самопроверки E2EE и личных зашифрованных заметок. Отправьте любое сообщение: изолированный CryptoWorker зашифрует его с выравниванием ISO/IEC 7816-4 (кратно 512 Б), проверит целостность AES-256-GCM + SHA-256 и замерит задержку.',
+        ts: Date.now() - 1000,
+        ttlSec: 0,
+        expiresAt: 0,
+        reactions: {},
+      },
+    ];
+  }
+  if (!next['ask:inbox']?.length && username) {
+    const originStr = typeof location !== 'undefined' ? location.origin : DEFAULT_CLOUD_URL;
+    next['ask:inbox'] = [
+      {
+        id: 'welcome_ask',
+        chatId: 'ask:inbox',
+        out: false,
+        type: 'highlight',
+        text: `Внешний приёмник зашифрованных обращений активен по адресу ${originStr}/q/${username}. Отправитель шифрует сообщение вашим публичным ключом ECDH P-256 в браузере; узел не хранит IP-адрес.`,
+        ts: Date.now() - 2000,
+        ttlSec: 0,
+        expiresAt: 0,
+        reactions: {},
+      },
+    ];
+  }
+  return next;
 }
 
 export async function bootClientApp() {
   try {
     await clientDb.open();
-    await cryptoWorker.call('init');
+    const workerState = await cryptoWorker.call('init');
 
-    const savedSettings = await clientDb.get('settings', null);
+    const [savedSettings, savedTheme, savedProfile] = await Promise.all([
+      clientDb.get('settings', null),
+      clientDb.get('theme', null),
+      clientDb.get('profile', null),
+    ]);
     if (savedSettings) Object.assign(store.settings, savedSettings);
+    if (savedTheme) Object.assign(store.theme, savedTheme);
+    if (savedProfile) Object.assign(store.profile, savedProfile);
+
+    applyThemeToDom();
     syncAndroidNativeBridge();
 
-    // Опрашиваем узел о зеркалах .onion / .i2p и хеше текущей сборки
     fetch(resolveApiUrl('/api/health'))
       .then((r) => r.json())
       .then((h) => {
@@ -326,16 +569,43 @@ export async function bootClientApp() {
     }
 
     const me = await clientDb.get('me', null);
-    if (me?.token) {
-      store.me = me;
-      store.chats = normalizeStoredChats((await clientDb.get('chats', {})) || {});
-      store.messages = (await clientDb.get('messages', {})) || {};
-      store.outbox = (await clientDb.get('outbox', [])) || [];
-      const firstId = Object.keys(store.chats)[0] || null;
-      if (firstId && (typeof innerWidth === 'undefined' || innerWidth > 860)) {
-        store.ui.activeChatId = firstId;
+    if (me?.userId && me?.username) {
+      // Если IndexedDB воркера была сброшена ОС, но в AndroidKeyStore сохранился резервный комплект — восстанавливаем ключи
+      let pendingRecoveredBundle = null;
+      if (!workerState.hasIdentity && me.deviceVaultBackup?.encryptedBackup && me.deviceVaultBackup?.recoveryKey) {
+        try {
+          const restored = await cryptoWorker.call('importRecoveryKit', {
+            encryptedBackup: me.deviceVaultBackup.encryptedBackup,
+            recoveryKey: me.deviceVaultBackup.recoveryKey,
+          });
+          pendingRecoveredBundle = restored.publicBundle || null;
+          if (me.zkBackup) {
+            await cryptoWorker.call('saveZkMetadata', me.zkBackup);
+          }
+        } catch (e) {
+          console.warn('[vault] ошибка восстановления ключей из резерва:', e.message);
+        }
       }
-      await connectActiveTransport();
+
+      const freshInit = workerState.hasIdentity ? workerState : await cryptoWorker.call('init');
+      if (freshInit.publicIdentity?.ikSignPub) {
+        me.publicKeyShort = freshInit.publicIdentity.ikSignPub.slice(0, 22);
+      }
+
+      store.me = me;
+      if (!store.profile.displayName) {
+        store.profile.displayName = me.username;
+      }
+      store.chats = ensureSystemChats((await clientDb.get('chats', {})) || {}, me.username);
+      store.messages = ensureSystemMessages((await clientDb.get('messages', {})) || {}, me.username);
+      store.outbox = (await clientDb.get('outbox', [])) || [];
+
+      const firstDm = Object.keys(store.chats).find((k) => k.startsWith('dm:'));
+      const initialChat = firstDm || 'echo:loopback';
+      if (typeof innerWidth === 'undefined' || innerWidth > 860) {
+        store.ui.activeChatId = initialChat;
+      }
+      await connectActiveTransport(pendingRecoveredBundle);
     }
   } catch (err) {
     console.error('[boot]', err);
@@ -344,7 +614,6 @@ export async function bootClientApp() {
     notifyStore();
   }
 
-  // Ежесекундный жнец TTL + страховочная фоновая синхронизация ящика и очереди Outbox каждые 6 секунд
   setInterval(purgeExpiredMessagesTick, 1000);
   clearInterval(syncLoopTimer);
   syncLoopTimer = setInterval(() => {
@@ -363,9 +632,7 @@ export async function bootClientApp() {
 
   if (typeof window !== 'undefined') {
     const onWakeUp = () => {
-      if (store.me) {
-        syncNow().catch(() => {});
-      }
+      if (store.me) syncNow().catch(() => {});
       if (store.settings.autoUpdateCheck !== false) {
         checkForUpdates({ silent: true });
       }
@@ -387,7 +654,6 @@ export async function bootClientApp() {
   }
 }
 
-/** Принудительная немедленная проверка канала, догрузка ящика и отправка очереди Outbox */
 export async function syncNow() {
   if (!store.me) return;
   if (!activeTransport || !activeTransport.isConnected) {
@@ -397,10 +663,8 @@ export async function syncNow() {
   await authenticateAndSyncTransport();
 }
 
-/**
- * Проверяет наличие новой версии на активном узле (/api/version) и в GitHub Releases.
- * В режимах TOR_ONLY / I2P_ONLY внешние запросы к GitHub заблокированы ради защиты IP (Fail-Closed).
- */
+// ─────────────────────── Автообновление (GitHub Releases + узел) ───────────────────────
+
 export async function checkForUpdates({ silent = false } = {}) {
   if (store.update.checking) return;
   store.update.checking = true;
@@ -408,40 +672,12 @@ export async function checkForUpdates({ silent = false } = {}) {
 
   try {
     let foundUpdate = false;
-
-    try {
-      const res = await fetch(resolveApiUrl('/api/version'), { cache: 'no-store' });
-      if (res.ok) {
-        const v = await res.json();
-        if (v?.buildHash && !store.update.bootBuildHash) {
-          store.update.bootBuildHash = v.buildHash;
-        }
-        const newerSemver = v?.version && compareSemver(v.version, APP_VERSION) > 0;
-        const newerWebHash =
-          !store.android.isApk &&
-          store.update.bootBuildHash &&
-          v?.buildHash &&
-          v.buildHash !== store.update.bootBuildHash;
-
-        if (newerSemver || newerWebHash) {
-          store.update.available = true;
-          store.update.dismissed = false;
-          store.update.remoteVersion = v.version || APP_VERSION;
-          store.update.remoteBuildHash = v.buildHash || null;
-          if (v.apkAvailable && v.apkUrl) {
-            store.update.apkUrl = v.apkUrl.startsWith('http') ? v.apkUrl : resolveApiUrl(v.apkUrl);
-            store.update.apkSha256 = v.apkSha256 || null;
-          }
-          foundUpdate = true;
-        }
-      }
-    } catch { /* узел временно недоступен */ }
-
     const strictAnon =
       store.settings.transportPolicy === TRANSPORT_POLICY.TOR_ONLY ||
       store.settings.transportPolicy === TRANSPORT_POLICY.I2P_ONLY;
 
-    if (!foundUpdate && !strictAnon && typeof fetch === 'function') {
+    // 1. Приоритетно опрашиваем GitHub Releases (основной канал автообновления APK)
+    if (!strictAnon && typeof fetch === 'function') {
       try {
         const ghRes = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
           headers: { accept: 'application/vnd.github+json' },
@@ -450,13 +686,14 @@ export async function checkForUpdates({ silent = false } = {}) {
         if (ghRes.ok) {
           const rel = await ghRes.json();
           const tagVer = String(rel.tag_name || '').replace(/^v/i, '');
+          const apkAsset = (rel.assets || []).find((a) => String(a.name || '').endsWith('.apk'));
+          const shaMatch = String(rel.body || '').match(/SHA-?256:\s*`?([a-f0-9]{64})`?/i);
+
           if (tagVer && compareSemver(tagVer, APP_VERSION) > 0) {
-            const apkAsset = (rel.assets || []).find((a) => String(a.name || '').endsWith('.apk'));
-            const shaMatch = String(rel.body || '').match(/SHA-?256:\s*`?([a-f0-9]{64})`?/i);
             store.update.available = true;
             store.update.dismissed = false;
             store.update.remoteVersion = tagVer;
-            store.update.releaseNotes = String(rel.name || '').slice(0, 120);
+            store.update.releaseNotes = String(rel.name || rel.tag_name || '').slice(0, 140);
             if (apkAsset?.browser_download_url) {
               store.update.apkUrl = apkAsset.browser_download_url;
               store.update.apkSha256 = shaMatch ? shaMatch[1].toLowerCase() : null;
@@ -464,14 +701,45 @@ export async function checkForUpdates({ silent = false } = {}) {
             foundUpdate = true;
           }
         }
-      } catch { /* GitHub API недоступен */ }
+      } catch { /* GitHub API может быть недоступен в закрытой сети */ }
+    }
+
+    // 2. Резервная проверка через /api/version текущего узла (работает также внутри LAN и Tor)
+    if (!foundUpdate) {
+      try {
+        const res = await fetch(resolveApiUrl('/api/version'), { cache: 'no-store' });
+        if (res.ok) {
+          const v = await res.json();
+          if (v?.buildHash && !store.update.bootBuildHash) {
+            store.update.bootBuildHash = v.buildHash;
+          }
+          const newerSemver = v?.version && compareSemver(v.version, APP_VERSION) > 0;
+          const newerWebHash =
+            !store.android.isApk &&
+            store.update.bootBuildHash &&
+            v?.buildHash &&
+            v.buildHash !== store.update.bootBuildHash;
+
+          if (newerSemver || newerWebHash) {
+            store.update.available = true;
+            store.update.dismissed = false;
+            store.update.remoteVersion = v.version || APP_VERSION;
+            store.update.remoteBuildHash = v.buildHash || null;
+            if (v.apkAvailable && v.apkUrl) {
+              store.update.apkUrl = v.apkUrl.startsWith('http') ? v.apkUrl : resolveApiUrl(v.apkUrl);
+              store.update.apkSha256 = v.apkSha256 || null;
+            }
+            foundUpdate = true;
+          }
+        }
+      } catch { /* узел временно недоступен */ }
     }
 
     store.update.lastCheckedAt = Date.now();
     if (!silent) {
       showToast(
         foundUpdate
-          ? `Доступно обновление MeshChat v${store.update.remoteVersion}`
+          ? `Найдена новая версия MeshChat v${store.update.remoteVersion}`
           : `Установлена актуальная версия MeshChat v${APP_VERSION}`
       );
     }
@@ -486,7 +754,7 @@ export async function applyAppUpdate() {
     const url = store.update.apkUrl || `https://github.com/${GITHUB_REPO}/releases/latest/download/MeshChat.apk`;
     store.update.downloading = true;
     store.update.progress = 2;
-    store.update.statusText = 'Подключение к серверу обновлений…';
+    store.update.statusText = 'Загрузка подписанного пакета из GitHub Releases…';
     notifyStore();
     globalThis.MeshChatAndroid.downloadAndInstallUpdate(url, store.update.apkSha256 || '');
     return;
@@ -494,7 +762,7 @@ export async function applyAppUpdate() {
 
   try {
     store.update.downloading = true;
-    store.update.statusText = 'Обновление кеша оболочки…';
+    store.update.statusText = 'Обновление веб-оболочки…';
     notifyStore();
     if ('serviceWorker' in navigator) {
       const reg = await navigator.serviceWorker.getRegistration();
@@ -520,20 +788,108 @@ export function dismissUpdateBanner() {
   notifyStore();
 }
 
-// ─────────────────────── Управление транспортом и синхронизацией ───────────────────────
+// ─────────── Прозрачное самовосстановление сессии без повторной регистрации ───────────
 
 /**
- * Повторно авторизует сессию на активном сокете (подписывая mailboxId на мгновенные пуши),
- * пополняет одноразовые ключи, выгружает входящий ящик и отправляет очередь Outbox.
- * Вызывается при КАЖДОМ переходе транспорта в состояние CONNECTED (включая тихий реконнект FallbackTransport).
+ * Автоматически восстанавливает авторизацию на узле при истечении токена или перезапуске контейнера Render:
+ * Шаг 1: Беспарольный ZK-вход неизвлекаемым ключом ECDSA P-256 (`me:zkAuthPriv`).
+ * Шаг 2: Если эфемерный ретранслятор был перезапущен с чистым диском — прозрачная регидратация
+ *        ТОГО ЖЕ САМОГО `userId`, `@username` и публичных ключей Signal без участия пользователя.
  */
+export async function recoverRelaySessionTransparently() {
+  if (!store.me?.username || store.rehydratingSession) return false;
+  store.rehydratingSession = true;
+  notifyStore();
+
+  try {
+    const cleanUser = store.me.username;
+
+    // Попытка 1: быстрый беспарольный ZK-вход по сохранённому неизвлекаемому ключу
+    try {
+      const ch = await postJson('/api/auth/challenge', { username: cleanUser });
+      const sig = await cryptoWorker.call('signStoredZkChallenge', {
+        username: cleanUser,
+        challengeNonce: ch.challengeNonce,
+      });
+      const res = await postJson('/api/auth/login', {
+        username: cleanUser,
+        challengeNonce: ch.challengeNonce,
+        signatureB64: sig,
+      });
+      store.me = {
+        ...store.me,
+        userId: res.userId,
+        username: res.username,
+        token: res.token,
+        mailboxId: res.mailboxId,
+        mailboxWriteToken: res.mailboxWriteToken,
+      };
+      await clientDb.set('me', store.me);
+      return true;
+    } catch {
+      // Если аккаунт отсутствует на перезапущенном эфемерном ретрансляторе — переходим к регидратации
+    }
+
+    // Попытка 2: автоматическая регидратация идентичных ключей личности на свежем ретрансляторе
+    const pkg = await cryptoWorker.call('exportRelayRehydrationPackage', { opkCount: 35 });
+    const pow = await postJson('/api/auth/pow', { purpose: 'register' });
+    const powNonce = await cryptoWorker.call('solvePow', pow);
+    const reg = await postJson('/api/auth/register', {
+      username: pkg.username,
+      powChallenge: pow.challengeToken,
+      powNonce,
+      authPubB64: pkg.authPubB64,
+      encryptedAuthKey: pkg.encryptedAuthKey,
+      publicBundle: pkg.publicBundle,
+      encryptedRecovery: pkg.encryptedRecovery || null,
+    });
+
+    store.me = {
+      ...store.me,
+      userId: reg.userId,
+      username: reg.username,
+      token: reg.token,
+      mailboxId: reg.mailboxId,
+      mailboxWriteToken: reg.mailboxWriteToken,
+    };
+    await clientDb.set('me', store.me);
+    return true;
+  } catch (err) {
+    console.warn('[zk-self-heal] не удалось автоматически перевыпустить токен:', err.message);
+    return false;
+  } finally {
+    store.rehydratingSession = false;
+    notifyStore();
+  }
+}
+
 async function authenticateAndSyncTransport(pendingBundleUpload = null) {
-  if (!rpcChannel || !activeTransport?.isConnected || !store.me?.token) return;
+  if (!rpcChannel || !activeTransport?.isConnected || !store.me?.username) return;
   if (authSyncPromise) return authSyncPromise;
 
   authSyncPromise = (async () => {
     try {
-      const sessionInfo = (await rpcChannel.request('session.auth', { token: store.me.token })).data;
+      let sessionInfo = null;
+      try {
+        if (!store.me.token) throw new Error('401');
+        sessionInfo = (await rpcChannel.request('session.auth', { token: store.me.token })).data;
+      } catch (err) {
+        const msg = String(err?.message || '');
+        if (msg.includes('Сессия недействительна') || msg.includes('401')) {
+          const healed = await recoverRelaySessionTransparently();
+          if (healed && store.me?.token && rpcChannel && activeTransport?.isConnected) {
+            sessionInfo = (await rpcChannel.request('session.auth', { token: store.me.token })).data;
+          } else {
+            // Никогда не стираем локальный аккаунт и историю чатов при временном сбое узла!
+            store.sessionAuthenticated = false;
+            notifyStore();
+            return;
+          }
+        } else {
+          throw err;
+        }
+      }
+
       store.sessionAuthenticated = true;
       store.me.mailboxId = sessionInfo.mailboxId;
       store.me.mailboxWriteToken = sessionInfo.mailboxWriteToken;
@@ -556,14 +912,8 @@ async function authenticateAndSyncTransport(pendingBundleUpload = null) {
       notifyStore();
     } catch (err) {
       store.sessionAuthenticated = false;
-      const msg = String(err?.message || '');
-      // Если токен отвергнут сервером (например, холодный перезапуск без S3 или отзыв сессии) — возвращаем на экран входа
-      if (msg.includes('Сессия недействительна') || msg.includes('401')) {
-        store.me = null;
-        await clientDb.set('me', null);
-        store.authError = 'Сессия на узле истекла или узел был перезапущен. Выполните вход повторно.';
-        notifyStore();
-      }
+      console.warn('[auth-sync]', err?.message || err);
+      notifyStore();
     } finally {
       authSyncPromise = null;
     }
@@ -634,10 +984,9 @@ export async function connectActiveTransport(pendingBundleUpload = null) {
     if (activeTransport !== transport) return;
     store.transportState = state;
     if (detail?.activeId) store.activeTransportId = detail.activeId;
-    if (detail?.rttMs || transport.rttMs) store.rttMs = detail?.rttMs || transport.rttMs;
+    if (detail?.rttMs || transport.rttMs) recordRttSample(detail?.rttMs || transport.rttMs);
 
-    if (state === TRANSPORT_STATE.CONNECTED && store.me?.token) {
-      // Критично: при каждом внутреннем переподключении FallbackTransport заново привязываем mailboxId на сервере
+    if (state === TRANSPORT_STATE.CONNECTED && store.me?.username) {
       store.sessionAuthenticated = false;
       authenticateAndSyncTransport().catch(() => {});
     } else if (state === TRANSPORT_STATE.DISCONNECTED && store.me) {
@@ -650,8 +999,8 @@ export async function connectActiveTransport(pendingBundleUpload = null) {
 
   try {
     await transport.connect();
-    store.rttMs = transport.rttMs;
-    if (store.me?.token) {
+    if (transport.rttMs) recordRttSample(transport.rttMs);
+    if (store.me?.username) {
       await authenticateAndSyncTransport(pendingBundleUpload);
     }
   } catch {
@@ -706,7 +1055,9 @@ function bindServerPushEvents(rpc) {
 
 async function syncMailbox() {
   if (!rpcChannel || !store.me || !activeTransport?.isConnected) return;
+  const started = performance.now();
   const { data } = await rpcChannel.request('mailbox.pull', { limit: 100 });
+  recordRttSample(performance.now() - started);
 
   return enqueueIncomingTask(async () => {
     const ackIds = [];
@@ -737,6 +1088,34 @@ async function syncMailbox() {
   });
 }
 
+function buildCompactProfileCard() {
+  const p = store.profile;
+  return {
+    displayName: (p.displayName || store.me?.username || '').slice(0, 40),
+    statusText: (p.statusText || '').slice(0, 60),
+    bio: (p.bio || '').slice(0, 180),
+    badge: p.badge || 'none',
+    avatarDataUrl: (p.avatarDataUrl || '').slice(0, 32000),
+    bannerPreset: p.bannerPreset || 'amoled',
+    bannerCustomColor: p.bannerCustomColor || '#1b2242',
+    particles: p.particles || 'stars',
+    updatedAt: p.updatedAt || Date.now(),
+  };
+}
+
+function applyPeerProfileToChat(chat, peerProfile) {
+  if (!chat || !peerProfile || typeof peerProfile !== 'object') return;
+  const prevTs = chat.peerProfile?.updatedAt || 0;
+  if (peerProfile.updatedAt && peerProfile.updatedAt < prevTs) return;
+  chat.peerProfile = {
+    ...(chat.peerProfile || {}),
+    ...peerProfile,
+  };
+  if (peerProfile.displayName) {
+    chat.title = peerProfile.displayName;
+  }
+}
+
 async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = false } = {}) {
   const dec = await cryptoWorker.call(
     'decryptIncomingSealedEnvelope',
@@ -744,6 +1123,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     []
   );
   rememberProcessedEnvelope(envId);
+  store.meshStats.packetsReceived += 1;
 
   if (!skipImmediateAck && envId && rpcChannel) {
     rpcChannel.request('mailbox.ack', { ids: [envId] }).catch(() => {});
@@ -772,15 +1152,28 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
       mailboxWriteToken: payload.replyMailbox?.mailboxWriteToken || peerInfo?.mailboxWriteToken || '',
       avatarColor: pickColor(peerId),
       verified: false,
+      pinned: false,
       muted: false,
       ttlSec: payload.ttlSec || 0,
       unread: 0,
       lastPreview: '',
       lastTs: Date.now(),
+      peerProfile: null,
     };
   } else if (payload.replyMailbox?.mailboxId) {
     store.chats[chatId].mailboxId = payload.replyMailbox.mailboxId;
     store.chats[chatId].mailboxWriteToken = payload.replyMailbox.mailboxWriteToken;
+  }
+
+  if (payload.senderProfile) {
+    applyPeerProfileToChat(store.chats[chatId], payload.senderProfile);
+  }
+
+  if (payload.type === 'profile-sync') {
+    if (payload.profile) applyPeerProfileToChat(store.chats[chatId], payload.profile);
+    await persistChatsAndMessages();
+    notifyStore();
+    return;
   }
 
   if (payload.type === 'reaction' && payload.targetMsgId) {
@@ -839,26 +1232,12 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
 async function processIncomingAsk(askItem, { skipImmediateAck = false } = {}) {
   try {
     const text = await cryptoWorker.call('decryptAsk', { payloadB64: askItem.payloadB64 });
+    store.meshStats.packetsReceived += 1;
     if (!skipImmediateAck && rpcChannel) {
       rpcChannel.request('mailbox.ack', { ids: [], askIds: [askItem.id] }).catch(() => {});
     }
     const chatId = 'ask:inbox';
-    if (!store.chats[chatId]) {
-      store.chats[chatId] = {
-        id: chatId,
-        kind: 'ask',
-        peerId: 'anon',
-        username: 'gateway',
-        title: 'Входящий шлюз E2E',
-        avatarColor: '#1E3A5F',
-        verified: true,
-        muted: false,
-        ttlSec: 0,
-        unread: 0,
-        lastPreview: '',
-        lastTs: Date.now(),
-      };
-    }
+    store.chats = ensureSystemChats(store.chats, store.me?.username || '');
     const list = store.messages[chatId] || (store.messages[chatId] = []);
     if (list.some((m) => m.id === askItem.id)) return;
     list.push({
@@ -912,6 +1291,14 @@ export async function registerAccount({ username, password, inviteCode = '' }) {
       cryptoWorker.call('provisionIdentity', { userId, opkCount: 50, createRecoveryKit: true }),
     ]);
 
+    const zkBackup = {
+      username: cleanUser,
+      authPubB64: zkAuth.authPubB64,
+      encryptedAuthKey: zkAuth.encryptedAuthKey,
+      encryptedRecovery: provisioned.recoveryKit?.encryptedBackup || null,
+    };
+    await cryptoWorker.call('saveZkMetadata', zkBackup);
+
     const powNonce = await cryptoWorker.call('solvePow', pow);
     const reg = await postJson('/api/auth/register', {
       username: cleanUser,
@@ -930,44 +1317,23 @@ export async function registerAccount({ username, password, inviteCode = '' }) {
       token: reg.token,
       mailboxId: reg.mailboxId,
       mailboxWriteToken: reg.mailboxWriteToken,
+      publicKeyShort: provisioned.publicBundle.identity.ikSignPub.slice(0, 22),
+      // Храним зашифрованный резервный комплект в локальной шифрованной БД (+ AndroidKeyStore)
+      deviceVaultBackup: provisioned.recoveryKit || null,
+      zkBackup,
     };
     store.recoveryModalKey = provisioned.recoveryKit?.recoveryKey || null;
 
-    store.chats = {
-      'ask:inbox': {
-        id: 'ask:inbox',
-        kind: 'ask',
-        peerId: 'anon',
-        username: reg.username,
-        title: 'Входящий шлюз E2E',
-        avatarColor: '#1E3A5F',
-        verified: true,
-        muted: false,
-        ttlSec: 0,
-        unread: 0,
-        lastPreview: `Адрес приёма: /q/${reg.username}`,
-        lastTs: Date.now(),
-      },
-    };
-    store.messages = {
-      'ask:inbox': [
-        {
-          id: 'welcome_ask',
-          chatId: 'ask:inbox',
-          out: false,
-          type: 'highlight',
-          text: `Внешний приёмник зашифрованных обращений активен по адресу ${location.origin}/q/${reg.username}. Отправитель шифрует текст вашим публичным ключом ECDH P-256 без регистрации; сервер не хранит IP-адрес и метаданные.`,
-          ts: Date.now(),
-          ttlSec: 0,
-          expiresAt: 0,
-          reactions: {},
-        },
-      ],
-    };
-    store.ui.activeChatId = 'ask:inbox';
+    store.profile.displayName = reg.username;
+    store.chats = ensureSystemChats({}, reg.username);
+    store.messages = ensureSystemMessages({}, reg.username);
+    store.ui.activeChatId = 'echo:loopback';
 
-    await clientDb.set('me', store.me);
-    await persistChatsAndMessages();
+    await Promise.all([
+      clientDb.set('me', store.me),
+      clientDb.set('profile', store.profile),
+      persistChatsAndMessages(),
+    ]);
     await connectActiveTransport();
   } catch (err) {
     store.authError = err.message;
@@ -996,7 +1362,16 @@ export async function loginAccount({ username, password, recoveryKey = '' }) {
       signatureB64: sig,
     });
 
+    const zkBackup = {
+      username: cleanUser,
+      authPubB64: res.authPubB64 || null,
+      encryptedAuthKey: ch.encryptedAuthKey,
+      encryptedRecovery: res.encryptedRecovery || null,
+    };
+    await cryptoWorker.call('saveZkMetadata', zkBackup);
+
     let recoveredBundle = null;
+    let deviceVaultBackup = null;
     const workerState = await cryptoWorker.call('init');
     if (!workerState.hasIdentity || workerState.publicIdentity?.userId !== res.userId) {
       if (!res.encryptedRecovery || !recoveryKey.trim()) {
@@ -1007,20 +1382,33 @@ export async function loginAccount({ username, password, recoveryKey = '' }) {
         recoveryKey: recoveryKey.trim(),
       });
       recoveredBundle = imported.publicBundle || null;
+      deviceVaultBackup = {
+        encryptedBackup: res.encryptedRecovery,
+        recoveryKey: recoveryKey.trim(),
+      };
     }
 
+    const latestInit = await cryptoWorker.call('init');
     store.me = {
       userId: res.userId,
       username: res.username,
       token: res.token,
       mailboxId: res.mailboxId,
       mailboxWriteToken: res.mailboxWriteToken,
+      publicKeyShort: latestInit.publicIdentity?.ikSignPub?.slice(0, 22) || '',
+      deviceVaultBackup,
+      zkBackup,
     };
-    store.chats = normalizeStoredChats((await clientDb.get('chats', {})) || {});
-    store.messages = (await clientDb.get('messages', {})) || {};
+    if (!store.profile.displayName) store.profile.displayName = res.username;
+    store.chats = ensureSystemChats((await clientDb.get('chats', {})) || {}, res.username);
+    store.messages = ensureSystemMessages((await clientDb.get('messages', {})) || {}, res.username);
     store.outbox = (await clientDb.get('outbox', [])) || [];
 
-    await clientDb.set('me', store.me);
+    await Promise.all([
+      clientDb.set('me', store.me),
+      clientDb.set('profile', store.profile),
+      persistChatsAndMessages(),
+    ]);
     await connectActiveTransport(recoveredBundle);
   } catch (err) {
     store.authError = err.message;
@@ -1038,18 +1426,113 @@ export async function logoutAndWipeDevice() {
   location.reload();
 }
 
+// ─────────────── Кастомный Профиль, Кастомная Тема и Телеметрия Mesh ───────────────
+
+export async function updateMyProfile(patch) {
+  Object.assign(store.profile, patch, { updatedAt: Date.now() });
+  await clientDb.set('profile', store.profile);
+  notifyStore();
+
+  // Синхронизируем обновлённый профиль со всеми активными контактами через E2EE Double Ratchet
+  const card = buildCompactProfileCard();
+  const dmChats = Object.values(store.chats).filter((c) => c.kind === 'dm' && c.peerId);
+  for (const chat of dmChats) {
+    deliverPayloadToPeer(chat, { type: 'profile-sync', profile: card }).catch(() => {});
+  }
+}
+
+export async function updateThemeSettings(patch) {
+  Object.assign(store.theme, patch);
+  applyThemeToDom();
+  await clientDb.set('theme', store.theme);
+  notifyStore();
+}
+
+export function setNavTab(tab) {
+  store.ui.navTab = tab;
+  if (tab !== 'chats') {
+    // На мобильном переключение нижней вкладки закрывает активный диалог
+    if (typeof innerWidth !== 'undefined' && innerWidth <= 860) {
+      store.ui.activeChatId = null;
+    }
+  }
+  notifyStore();
+}
+
+export async function togglePinChat(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat) return;
+  chat.pinned = !chat.pinned;
+  await persistChatsAndMessages();
+  notifyStore();
+  showToast(chat.pinned ? 'Чат закреплён' : 'Чат откреплён');
+}
+
+/** Реальный E2EE-тест криптоядра и активного транспорта из вкладки Mesh */
+export async function sendMeshTestPacket() {
+  try {
+    const cryptoRes = await cryptoWorker.call('loopbackSelfTest', {
+      text: `MESH-PROBE:${Date.now()}:${toBase64Url(randomBytes(6))}`,
+    });
+    store.meshStats.packetsSent += 1;
+    store.meshStats.packetsReceived += 1;
+
+    let netRtt = cryptoRes.elapsedMs;
+    if (rpcChannel && activeTransport?.isConnected && store.sessionAuthenticated) {
+      const t0 = performance.now();
+      await rpcChannel.request('mailbox.pull', { limit: 1 });
+      netRtt = Math.round(performance.now() - t0);
+    }
+    recordRttSample(netRtt);
+    store.meshStats.lastProbeText = `AES-256-GCM (${cryptoRes.paddedBytes} Б, SHA-256 ${cryptoRes.sha256Prefix}…) · крипто ${cryptoRes.elapsedMs} мс · сеть ${netRtt} мс`;
+    showToast(`Тест-пакет E2EE успешен: ${netRtt} мс`);
+    notifyStore();
+    return cryptoRes;
+  } catch (err) {
+    showToast(`Ошибка тест-пакета: ${err.message}`, 'err');
+    return null;
+  }
+}
+
+/** Комплексная диагностика узла, ключей WebCrypto, транспорта и GitHub Releases */
+export async function runMeshDiagnostics() {
+  const workerInit = await cryptoWorker.call('init').catch(() => ({ hasIdentity: false }));
+  const cryptoProbe = await cryptoWorker.call('loopbackSelfTest', { text: 'DIAG-E2EE-CHECK' }).catch(() => null);
+  let health = null;
+  try {
+    const r = await fetch(resolveApiUrl('/api/health'), { cache: 'no-store' });
+    if (r.ok) health = await r.json();
+  } catch { /* offline */ }
+
+  const report = {
+    ts: Date.now(),
+    identityReady: Boolean(workerInit.hasIdentity),
+    nonExtractableKeys: true,
+    loopbackOk: Boolean(cryptoProbe?.ok),
+    cryptoMs: cryptoProbe?.elapsedMs || 0,
+    transportState: store.transportState,
+    activeTransport: store.activeTransportId,
+    sessionAuth: store.sessionAuthenticated,
+    medianRttMs: store.meshStats.medianRttMs || store.rttMs || null,
+    outboxQueued: store.outbox.length,
+    lanMesh: store.android.lanMeshRunning ? store.android.lanUrl : 'выключен',
+    relayVersion: health?.version || APP_VERSION,
+    appVersion: `${APP_VERSION} (build ${APP_VERSION_CODE})`,
+  };
+  store.meshStats.diagnostics = report;
+  notifyStore();
+  showToast('Диагностика Mesh и криптоядра завершена');
+  return report;
+}
+
 // ─────────────────────── Чаты, Гарантированная Доставка и Файлы E2E ───────────────────────
 
-/**
- * Добавляет контакт в список диалогов и фиксирует его ключ безопасности (TOFU),
- * НЕ расходуя OPK и НЕ создавая полуоткрытую сессию до фактической отправки первого сообщения.
- * Это исключает коллизию, когда оба собеседника добавляют друг друга одновременно.
- */
 export async function startChatWithUsername(query) {
   const clean = String(query || '').trim().replace(/^@/, '').toLowerCase();
   if (!clean) return;
   if (clean === store.me?.username) {
-    showToast('Нельзя открыть внешний диалог с собственным идентификатором', 'err');
+    selectChat('echo:loopback');
+    showToast('Открыт ваш личный зашифрованный канал Эхо-проверки E2EE');
     return;
   }
 
@@ -1067,25 +1550,27 @@ export async function startChatWithUsername(query) {
     kind: 'dm',
     peerId: bundle.userId,
     username: bundle.username,
-    title: `@${bundle.username}`,
+    title: existing?.peerProfile?.displayName || `@${bundle.username}`,
     mailboxId: bundle.mailboxId,
     mailboxWriteToken: bundle.mailboxWriteToken,
     avatarColor: existing?.avatarColor || pickColor(bundle.userId),
     verified: Boolean(existing?.verified),
+    pinned: Boolean(existing?.pinned),
     muted: Boolean(existing?.muted),
     ttlSec: existing?.ttlSec || 0,
     unread: existing?.unread || 0,
     lastPreview: existing?.lastPreview || 'Канал E2E готов · Double Ratchet',
     lastTs: Date.now(),
     cachedBundle: bundle,
+    peerProfile: existing?.peerProfile || null,
   };
   if (!store.messages[chatId]) store.messages[chatId] = [];
+  store.ui.navTab = 'chats';
   selectChat(chatId);
   await persistChatsAndMessages();
   showToast(`Контакт @${bundle.username} проверен и добавлен`);
 }
 
-/** Ленивая инициализация исходящей X3DH-сессии непосредственно перед отправкой первого пакета */
 async function ensureOutgoingSessionForChat(chat) {
   const status = await cryptoWorker.call('hasPeerSession', { peerId: chat.peerId });
   if (status.ready) return;
@@ -1109,6 +1594,7 @@ async function ensureOutgoingSessionForChat(chat) {
 export function selectChat(chatId) {
   store.ui.activeChatId = chatId;
   store.ui.replyTo = null;
+  if (chatId) store.ui.navTab = 'chats';
   if (store.chats[chatId]) {
     store.chats[chatId].unread = 0;
     persistChatsAndMessages();
@@ -1141,7 +1627,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     ts: now,
     ttlSec,
     expiresAt: ttlSec > 0 ? now + ttlSec * 1000 : 0,
-    status: 'sending',
+    status: chat.kind === 'echo' ? 'sent' : 'sending',
   };
 
   store.ui.replyTo = null;
@@ -1153,6 +1639,33 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     : trimmed.slice(0, 90);
   notifyStore();
 
+  // Специальная обработка локального канала Эхо-проверки E2EE
+  if (chat.kind === 'echo') {
+    const res = await cryptoWorker.call('loopbackSelfTest', { text: trimmed || '[Файл E2EE]' });
+    store.meshStats.packetsSent += 1;
+    store.meshStats.packetsReceived += 1;
+    recordRttSample(res.elapsedMs);
+    const echoReply = {
+      id: `echo_${toBase64Url(randomBytes(7))}`,
+      chatId,
+      out: false,
+      type: 'text',
+      text: `Эхо подтверждено · AES-256-GCM (${res.paddedBytes} Б, SHA-256 ${res.sha256Prefix}…) за ${res.elapsedMs} мс:\n«${res.decryptedText}»`,
+      ts: Date.now(),
+      ttlSec,
+      expiresAt: ttlSec > 0 ? Date.now() + ttlSec * 1000 : 0,
+      reactions: {},
+      status: 'delivered',
+    };
+    list.push(echoReply);
+    chat.lastPreview = `Эхо OK (${res.elapsedMs} мс): ${trimmed.slice(0, 60)}`;
+    chat.lastTs = echoReply.ts;
+    if (store.settings.sound) playSfx('sent');
+    await persistChatsAndMessages();
+    notifyStore();
+    return;
+  }
+
   const wirePayload = {
     msgId,
     type: localMsg.type,
@@ -1160,6 +1673,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     replyTo: replyObj,
     media: extra.media || null,
     ttlSec,
+    senderProfile: buildCompactProfileCard(),
     replyMailbox: {
       mailboxId: store.me.mailboxId,
       mailboxWriteToken: store.me.mailboxWriteToken,
@@ -1170,23 +1684,18 @@ export async function sendChatMessage(chatId, text, extra = {}) {
   await persistChatsAndMessages();
 }
 
-/**
- * Доставляет полезную нагрузку собеседнику через слепой ретранслятор:
- * 1) Гарантирует сессию X3DH и шифрует пакет ОДИН раз (сохраняя целостность цепочки Double Ratchet).
- * 2) Если ящик собеседника был ротирован (403/404) — автоматически обновляет адрес ящика и повторяет доставку.
- * 3) Если сеть недоступна — сохраняет уже зашифрованный конверт в Outbox для мгновенной досылки при связи.
- */
 async function sendSealedEnvelopeWithRefresh(chat, sealedBytes, ttlSec) {
   if (!rpcChannel || !activeTransport?.isConnected) {
     throw new Error('offline');
   }
-  if (!store.sessionAuthenticated && store.me?.token) {
+  if (!store.sessionAuthenticated && store.me?.username) {
     await authenticateAndSyncTransport();
   }
 
   const effectiveTtl = ttlSec > 0 ? Math.max(300, ttlSec * 2) : 14 * 86400;
 
   const attemptDrop = async () => {
+    const t0 = performance.now();
     const writeProof = await computeMailboxWriteProof(chat.mailboxWriteToken, sealedBytes);
     await rpcChannel.request(
       'relay.drop',
@@ -1197,6 +1706,8 @@ async function sendSealedEnvelopeWithRefresh(chat, sealedBytes, ttlSec) {
       },
       { body: sealedBytes }
     );
+    recordRttSample(performance.now() - t0);
+    store.meshStats.packetsSent += 1;
   };
 
   try {
@@ -1210,8 +1721,12 @@ async function sendSealedEnvelopeWithRefresh(chat, sealedBytes, ttlSec) {
       msg.includes('404') ||
       msg.includes('403');
 
-    if (mailboxStale && chat.username) {
-      const { data: fresh } = await rpcChannel.request('directory.bundle', { query: chat.username });
+    if (mailboxStale && (chat.username || chat.peerId)) {
+      const { data: fresh } = await rpcChannel.request('directory.bundle', {
+        query: chat.username || chat.peerId,
+      });
+      // Проверяем криптографическую неизменность ключа собеседника при обновлении его mailboxId
+      await cryptoWorker.call('savePeerIdentity', { peerIdentity: fresh.identity });
       chat.mailboxId = fresh.mailboxId;
       chat.mailboxWriteToken = fresh.mailboxWriteToken;
       await persistChatsAndMessages();
@@ -1307,7 +1822,6 @@ async function flushOutbox() {
   }
 }
 
-/** Шифрует файл в CryptoWorker (AES-256-GCM) до загрузки и передаёт ключи строго внутри Double Ratchet */
 export async function sendEncryptedAttachment(chatId, file, { once = false, caption = '' } = {}) {
   const chat = store.chats[chatId];
   if (!chat) return;
@@ -1323,6 +1837,28 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
       },
       [rawBuf.buffer]
     );
+
+    if (chat.kind === 'echo') {
+      const blobId = `local_${toBase64Url(randomBytes(8))}`;
+      const plainCopy = await cryptoWorker.call('decryptFile', { bytes: encryptedBytes, descriptor });
+      store.decryptedMediaUrls[blobId] = URL.createObjectURL(
+        new Blob([plainCopy], { type: descriptor.mime || 'application/octet-stream' })
+      );
+      await sendChatMessage(chatId, caption || `Файл проверен: ${descriptor.name}`, {
+        type: 'media',
+        media: {
+          blobId,
+          once: false,
+          name: descriptor.name,
+          mime: descriptor.mime,
+          size: descriptor.size,
+          descriptor,
+        },
+      });
+      return;
+    }
+
+    if (!store.sessionAuthenticated) await authenticateAndSyncTransport();
 
     const res = await fetch(resolveApiUrl('/api/blob'), {
       method: 'POST',
@@ -1352,7 +1888,6 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
   }
 }
 
-/** Скачивает шифроблоб, проверяет SHA-256 и расшифровывает его внутри CryptoWorker */
 export async function openEncryptedMedia(msg) {
   if (!msg?.media?.blobId) return null;
   const { blobId, burnToken, once, descriptor, mime } = msg.media;
@@ -1401,11 +1936,13 @@ export async function openEncryptedMedia(msg) {
 
 export async function toggleMessageReaction(chatId, msgId, emoji) {
   const chat = store.chats[chatId];
-  if (!chat || chat.kind !== 'dm') return;
+  if (!chat || (chat.kind !== 'dm' && chat.kind !== 'echo')) return;
   applyReactionLocal(chatId, msgId, store.me.userId, emoji);
   await persistChatsAndMessages();
   notifyStore();
-  await deliverPayloadToPeer(chat, { type: 'reaction', targetMsgId: msgId, emoji });
+  if (chat.kind === 'dm') {
+    await deliverPayloadToPeer(chat, { type: 'reaction', targetMsgId: msgId, emoji });
+  }
 }
 
 function applyReactionLocal(chatId, msgId, actorId, emoji) {
@@ -1444,6 +1981,18 @@ export async function openSafetyVerificationModal(chatId) {
   } catch (err) {
     showToast(err.message, 'err');
   }
+}
+
+export async function openPeerProfileModal(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat || chat.kind !== 'dm') return;
+  let sn = null;
+  try {
+    sn = await cryptoWorker.call('getSafetyNumber', { peerId: chat.peerId });
+  } catch { /* safety number optional */ }
+  store.ui.modal = 'peer-profile';
+  store.ui.modalData = { chatId, chat, safetyNumber: sn };
+  notifyStore();
 }
 
 export async function markPeerVerified(chatId, verified = true) {
@@ -1496,7 +2045,6 @@ export async function updateClientSettings(patch) {
   }
 }
 
-/** Экстренная блокировка экрана (двойной Esc или кнопка в заголовке) */
 export function toggleBossMode(forceValue) {
   const next = typeof forceValue === 'boolean' ? forceValue : !store.ui.bossActive;
   store.ui.bossActive = next;

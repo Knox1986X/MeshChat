@@ -1,6 +1,7 @@
-// Локальное зашифрованное хранилище клиента в IndexedDB (не localStorage!).
-// Все записи (сессия, список чатов, история сообщений, очередь Outbox) шифруются на лету
-// неизвлекаемым ключом AES-256-GCM (extractable: false), хранящимся в отдельном store IndexedDB.
+// Локальное зашифрованное хранилище клиента в IndexedDB (не localStorage!)
+// с аппаратным зеркалированием в AndroidKeyStore (getFilesDir()/vault) внутри APK.
+// Все записи (сессия, чаты, история, профиль, тема, очередь Outbox) шифруются на лету
+// неизвлекаемым ключом AES-256-GCM (extractable: false).
 
 import {
   utf8ToBytes,
@@ -18,6 +19,18 @@ const DB_NAME = 'veil_client_storage_v1';
 const DB_VER = 1;
 const STORE_KEY = 'master_key';
 const STORE_DATA = 'encrypted_kv';
+
+function getNativeVaultBridge() {
+  if (
+    typeof window !== 'undefined' &&
+    window.MeshChatAndroid &&
+    typeof window.MeshChatAndroid.writeNativeVault === 'function' &&
+    typeof window.MeshChatAndroid.readNativeVault === 'function'
+  ) {
+    return window.MeshChatAndroid;
+  }
+  return null;
+}
 
 export class EncryptedClientDb {
   constructor() {
@@ -52,20 +65,49 @@ export class EncryptedClientDb {
   async get(key, fallback = null) {
     await this.open();
     const rec = await this._rawGet(STORE_DATA, key);
-    if (!rec) return fallback;
-    try {
-      const aad = utf8ToBytes(`VEIL-CLIENT-KV-v1:${key}`);
-      const pt = await aesGcmDecrypt(this._key, fromBase64Url(rec.iv), fromBase64Url(rec.ct), aad);
-      const val = JSON.parse(bytesToUtf8(pt));
-      wipe(pt);
-      return val;
-    } catch {
-      return fallback;
+    if (rec) {
+      try {
+        const aad = utf8ToBytes(`VEIL-CLIENT-KV-v1:${key}`);
+        const pt = await aesGcmDecrypt(this._key, fromBase64Url(rec.iv), fromBase64Url(rec.ct), aad);
+        const val = JSON.parse(bytesToUtf8(pt));
+        wipe(pt);
+        return val;
+      } catch {
+        // Если ключ IndexedDB был пересоздан ОС — пробуем восстановить из AndroidKeyStore
+      }
     }
+
+    const bridge = getNativeVaultBridge();
+    if (bridge) {
+      try {
+        const rawJson = bridge.readNativeVault(`kv_${key}`);
+        if (rawJson) {
+          const parsed = JSON.parse(rawJson);
+          // Восстанавливаем запись обратно в зашифрованную IndexedDB
+          await this._writeIdbOnly(key, parsed).catch(() => {});
+          return parsed;
+        }
+      } catch {
+        // Игнорируем ошибку чтения резервного хранилища
+      }
+    }
+    return fallback;
   }
 
   async set(key, value) {
     await this.open();
+    await this._writeIdbOnly(key, value);
+    const bridge = getNativeVaultBridge();
+    if (bridge) {
+      try {
+        bridge.writeNativeVault(`kv_${key}`, JSON.stringify(value));
+      } catch {
+        // Сбой зеркалирования не должен блокировать основную запись в IDB
+      }
+    }
+  }
+
+  async _writeIdbOnly(key, value) {
     const iv = randomBytes(12);
     const plain = utf8ToBytes(JSON.stringify(value));
     const aad = utf8ToBytes(`VEIL-CLIENT-KV-v1:${key}`);
@@ -76,6 +118,10 @@ export class EncryptedClientDb {
 
   async del(key) {
     await this.open();
+    const bridge = getNativeVaultBridge();
+    if (bridge && typeof bridge.deleteNativeVault === 'function') {
+      try { bridge.deleteNativeVault(`kv_${key}`); } catch {}
+    }
     if (!this._db) {
       this._mem.delete(`${STORE_DATA}:${key}`);
       return;
@@ -91,6 +137,10 @@ export class EncryptedClientDb {
   async clearAll() {
     this._key = null;
     this._mem.clear();
+    const bridge = getNativeVaultBridge();
+    if (bridge && typeof bridge.clearNativeVault === 'function') {
+      try { bridge.clearNativeVault(); } catch {}
+    }
     if (!this._db) return;
     await new Promise((resolve, reject) => {
       const tx = this._db.transaction([STORE_KEY, STORE_DATA], 'readwrite');
@@ -116,9 +166,9 @@ export class EncryptedClientDb {
       this._mem.set(`${storeName}:${key}`, val);
       return;
     }
-    await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const tx = this._db.transaction(storeName, 'readwrite');
-      tx.objectStore(storeName).put(val, key);
+      tx.objectStore(STORE_DATA === storeName ? STORE_DATA : storeName).put(val, key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

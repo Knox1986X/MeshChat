@@ -173,6 +173,7 @@ export class AuthService {
       username: user.username,
       mailboxId: user.mailboxId,
       mailboxWriteToken: user.mailboxWriteToken,
+      authPubB64: user.authPubB64,
       encryptedRecovery: user.encryptedRecovery || null,
       token: session.token,
       expiresAt: session.expiresAt,

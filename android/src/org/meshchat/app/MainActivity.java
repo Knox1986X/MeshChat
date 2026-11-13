@@ -1,13 +1,13 @@
-// Главный экран Android-приложения MeshChat.
-// Запускает локальный Orbot/I2P SOCKS5-мост (127.0.0.1:17700) и встроенный слепой узел (127.0.0.1:17701),
-// включает аппаратную защиту от скриншотов в списке недавних приложений (FLAG_SECURE, как в Signal)
-// и связывает WebView с системным выбором файлов и микрофоном для P2P-вызовов.
+// Главный экран Android-приложения MeshChat v1.3.
+// Запускает локальный Orbot/I2P SOCKS5-мост (127.0.0.1:17700), встроенный узел (127.0.0.1:17701),
+// аппаратное хранилище сессии в AndroidKeyStore (MeshNativeVault) и автообновление через GitHub Releases.
 
 package org.meshchat.app;
 
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
@@ -36,6 +36,7 @@ public final class MainActivity extends Activity {
     private MeshSocksBridge socksBridge;
     private MeshLocalNode localNode;
     private MeshUpdater updater;
+    private MeshNativeVault nativeVault;
     private ValueCallback<Uri[]> fileUploadCallback;
     private PermissionRequest pendingWebRtcPermission;
 
@@ -43,14 +44,15 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Окрашиваем системные панели в строгий графитовый цвет (#090b0f) и блокируем перехват в Recents
         Window window = getWindow();
         if (window != null) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.parseColor("#090b0f"));
-            window.setNavigationBarColor(Color.parseColor("#0c0f15"));
+            window.setStatusBarColor(Color.parseColor("#0b0d14"));
+            window.setNavigationBarColor(Color.parseColor("#0b0d14"));
         }
+
+        nativeVault = new MeshNativeVault(this);
 
         socksBridge = new MeshSocksBridge();
         socksBridge.start();
@@ -60,10 +62,10 @@ public final class MainActivity extends Activity {
         updater = new MeshUpdater(this);
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#090b0f"));
+        root.setBackgroundColor(Color.parseColor("#0b0d14"));
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.parseColor("#090b0f"));
+        webView.setBackgroundColor(Color.parseColor("#0b0d14"));
         configureWebView(webView);
 
         root.addView(webView, new FrameLayout.LayoutParams(
@@ -81,7 +83,6 @@ public final class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        // Запрещаем прямой доступ к файловой системе Android из JS (защита от локального LFI)
         s.setAllowFileAccess(false);
         s.setAllowContentAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
@@ -119,7 +120,7 @@ public final class MainActivity extends Activity {
                     Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType("*/*");
-                    startActivityForResult(Intent.createChooser(intent, "Выберите файл для E2E-шифрования"), REQ_FILE_CHOOSER);
+                    startActivityForResult(Intent.createChooser(intent, "Выберите файл"), REQ_FILE_CHOOSER);
                     return true;
                 } catch (Exception e) {
                     fileUploadCallback = null;
@@ -204,8 +205,42 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами MeshChat из Preact UI */
+    /** Нативный мост управления узлами, автообновлением и аппаратным хранилищем AndroidKeyStore */
     public final class AndroidJsBridge {
+        @JavascriptInterface
+        public String getAppInfoJson() {
+            try {
+                PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+                JSONObject o = new JSONObject();
+                o.put("packageName", getPackageName());
+                o.put("versionName", pi.versionName);
+                o.put("versionCode", pi.versionCode);
+                return o.toString();
+            } catch (Exception e) {
+                return "{\"packageName\":\"io.meshchat.app\"}";
+            }
+        }
+
+        @JavascriptInterface
+        public void writeNativeVault(String key, String value) {
+            if (nativeVault != null) nativeVault.write(key, value);
+        }
+
+        @JavascriptInterface
+        public String readNativeVault(String key) {
+            return nativeVault != null ? nativeVault.read(key) : null;
+        }
+
+        @JavascriptInterface
+        public void deleteNativeVault(String key) {
+            if (nativeVault != null) nativeVault.delete(key);
+        }
+
+        @JavascriptInterface
+        public void clearNativeVault() {
+            if (nativeVault != null) nativeVault.clearAll();
+        }
+
         @JavascriptInterface
         public void setUpstreamServer(String serverUrl) {
             if (localNode != null) {

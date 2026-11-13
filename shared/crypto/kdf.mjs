@@ -146,6 +146,8 @@ export async function createZkAuthRegistration(username, password, options = {})
     const authPair = await generateEcdsaKeyPair({ extractable: true });
     const authPubRaw = await exportRawPublicKey(authPair.publicKey);
     const authPrivPkcs8 = await exportPkcs8PrivateKey(authPair.privateKey);
+    // Импортируем неизвлекаемую копию ключа для прозрачной повторной ZK-авторизации без ввода пароля
+    const authPrivKey = await importEcdsaPrivateKeyPkcs8(authPrivPkcs8, { extractable: false });
     const iv = randomBytes(12);
     const aad = utf8ToBytes(`MSG-ZK-AUTH-WRAP-v1:${clean}`);
     const ct = await aesGcmEncrypt(authKey, iv, authPrivPkcs8, aad);
@@ -154,6 +156,7 @@ export async function createZkAuthRegistration(username, password, options = {})
     return {
       username: clean,
       authPubB64: toBase64Url(authPubRaw),
+      authPrivKey,
       encryptedAuthKey: {
         v: 1,
         alg: kdfInfo.algorithm,
@@ -169,11 +172,32 @@ export async function createZkAuthRegistration(username, password, options = {})
 }
 
 /**
+ * Подпись серверного challengeNonce уже сохранённым неизвлекаемым ключом ECDSA P-256 (extractable: false).
+ * Позволяет мгновенно обновлять токен сессии после перезапуска приложения или ретранслятора без ввода пароля.
+ */
+export async function signZkChallengeWithNativeKey(authPrivKey, username, challengeNonce) {
+  if (!authPrivKey) {
+    throw new Error('Локальный ключ ZK-авторизации отсутствует');
+  }
+  const clean = normalizeUsername(username);
+  const payload = utf8ToBytes(`MSG-ZK-LOGIN-v1:${clean}:${challengeNonce}`);
+  const sig = await ecdsaSign(authPrivKey, payload);
+  return toBase64Url(sig);
+}
+
+/**
  * Асимметричный Zero-Knowledge вход:
  * Расшифровывает encryptedAuthKey локально с помощью пароля (Argon2id), подписывает серверный
  * одноразовый challengeNonce ключом ECDSA P-256 и затирает ключи в RAM.
  */
-export async function signZkLoginChallenge({ username, password, encryptedAuthKey, challengeNonce, options = {} }) {
+export async function signZkLoginChallenge({
+  username,
+  password,
+  encryptedAuthKey,
+  challengeNonce,
+  returnKeyPair = false,
+  options = {},
+}) {
   if (!encryptedAuthKey || encryptedAuthKey.v !== 1) {
     throw new Error('Некорректный конверт ключа аутентификации');
   }
@@ -196,9 +220,11 @@ export async function signZkLoginChallenge({ username, password, encryptedAuthKe
     const authPriv = await importEcdsaPrivateKeyPkcs8(pkcs8, { extractable: false });
     wipe(pkcs8);
 
-    const payload = utf8ToBytes(`MSG-ZK-LOGIN-v1:${clean}:${challengeNonce}`);
-    const sig = await ecdsaSign(authPriv, payload);
-    return toBase64Url(sig);
+    const sigB64 = await signZkChallengeWithNativeKey(authPriv, clean, challengeNonce);
+    if (returnKeyPair) {
+      return { signatureB64: sigB64, authPrivKey: authPriv };
+    }
+    return sigB64;
   } finally {
     wipe(authKey);
     wipe(localWrapKey);

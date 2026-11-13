@@ -1,6 +1,6 @@
 // Базовые утилиты интерфейса: векторные иконки (0 сетевых запросов),
-// синтезатор сдержанных системных сигналов WebAudio, рендер скрытого текста (||...||)
-// и экран экстренной маскировки рабочего окна (двойной Esc).
+// компонент аватаров с поддержкой фото и геометрического паттерна, фоновые частицы профиля,
+// синтезатор системных сигналов WebAudio и экран экстренной маскировки (двойной Esc).
 
 import { html, useState } from '../../vendor/preact.mjs';
 
@@ -81,6 +81,37 @@ export const TTL_CHOICES = [
 export function ttlText(sec) {
   const found = TTL_CHOICES.find(([v]) => v === Number(sec));
   return found ? found[1] : `${sec} с`;
+}
+
+// ─────────────────────── Сжатие пользовательского фото аватара в браузере ───────────────────────
+
+export function compressAvatarImageFile(file, maxSide = 176, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type?.startsWith('image/')) {
+      reject(new Error('Выберите графический файл (JPEG, PNG или WebP)'));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Не удалось прочитать изображение'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Повреждённый формат изображения'));
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = maxSide;
+        canvas.height = maxSide;
+        const ctx = canvas.getContext('2d');
+        const minDim = Math.min(img.width, img.height);
+        const sx = Math.floor((img.width - minDim) / 2);
+        const sy = Math.floor((img.height - minDim) / 2);
+        ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, maxSide, maxSide);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 // ─────────────────────── Безопасный рендер текста, кода и скрытых блоков (0 XSS) ───────────────────────
@@ -169,6 +200,16 @@ const ICON_PATHS = {
   settings: html`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
   chat: html`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>`,
   users: html`<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
+  user: html`<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>`,
+  radar: html`<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><path d="M12 12 18.3 5.7"/>`,
+  camera: html`<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>`,
+  palette: html`<circle cx="13.5" cy="6.5" r=".8" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".8" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".8" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".8" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.43-.18-.83-.44-1.12-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h1.99c3.05 0 5.55-2.5 5.55-5.55C21.97 6.01 17.46 2 12 2z"/>`,
+  pin: html`<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/>`,
+  star: html`<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>`,
+  bolt: html`<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
+  diamond: html`<path d="M6 3h12l4 6-10 12L2 9Z"/>`,
+  qr: html`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM14 19h2M19 14v2"/>`,
+  activity: html`<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>`,
   edit: html`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`,
   refresh: html`<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>`,
   download: html`<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
@@ -187,6 +228,76 @@ export function Icon({ name, size = 18 }) {
     stroke-linejoin="round"
     aria-hidden="true"
   >${ICON_PATHS[name] || ICON_PATHS.info}</svg>`;
+}
+
+/** Значок статуса профиля рядом с именем */
+export function ProfileBadgeIcon({ badge, size = 14 }) {
+  if (!badge || badge === 'none') return null;
+  const map = {
+    verified: { icon: 'shield', cls: 'badge-verified', title: 'Подтверждённый E2EE профиль' },
+    star: { icon: 'star', cls: 'badge-star', title: 'Избранный статус' },
+    bolt: { icon: 'bolt', cls: 'badge-bolt', title: 'Активный узел Mesh' },
+    shield: { icon: 'lock', cls: 'badge-shield', title: 'Защищённый контур' },
+    diamond: { icon: 'diamond', cls: 'badge-diamond', title: 'Кастомный профиль' },
+  };
+  const item = map[badge] || map.verified;
+  return html`<span class=${`profile-badge-chip ${item.cls}`} title=${item.title}>
+    <${Icon} name=${item.icon} size=${size} />
+  </span>`;
+}
+
+/** Универсальный квадратный/сквиркл/круглый аватар без геометрических искажений */
+export function AvatarBox({
+  title = '',
+  username = '',
+  color = '#3B4CCA',
+  avatarDataUrl = '',
+  kind = 'dm',
+  size = 46,
+  online = false,
+  className = '',
+  onClick = null,
+}) {
+  const raw = (title || username || '?').replace(/^@/, '').trim();
+  const initials = kind === 'echo'
+    ? 'ЭЕ'
+    : raw.split(/\s+/).length >= 2
+      ? (raw.split(/\s+/)[0][0] + raw.split(/\s+/)[1][0]).toUpperCase()
+      : raw.slice(0, 2).toUpperCase();
+
+  return html`<div
+    class=${`avatar-box ${className}`}
+    style=${`width:${size}px;height:${size}px;background:${avatarDataUrl ? '#0e111b' : color}`}
+    onClick=${onClick}
+  >
+    ${avatarDataUrl
+      ? html`<img src=${avatarDataUrl} alt="" class="avatar-img" loading="lazy" />`
+      : kind === 'ask'
+        ? html`<${Icon} name="inbox" size=${Math.round(size * 0.44)} />`
+        : html`<span class="avatar-initials" style=${`font-size:${Math.max(11, Math.round(size * 0.34))}px`}>${initials}</span>`}
+    ${online && html`<span class="avatar-online-dot"></span>`}
+  </div>`;
+}
+
+// ─────────────────────── Декоративные частицы баннера профиля ───────────────────────
+
+const PARTICLE_DOTS = Array.from({ length: 22 }, (_, i) => ({
+  left: `${(i * 37 + 11) % 94 + 3}%`,
+  top: `${(i * 53 + 7) % 86 + 6}%`,
+  size: (i % 3) + 2,
+  delay: `${(i * 0.45).toFixed(2)}s`,
+  dur: `${(3.6 + (i % 5) * 0.85).toFixed(2)}s`,
+}));
+
+export function AmbientParticles({ effect = 'stars' }) {
+  if (!effect || effect === 'none') return null;
+  return html`<div class=${`ambient-particles effect-${effect}`} aria-hidden="true">
+    ${PARTICLE_DOTS.map((d, idx) => html`<span
+      key=${idx}
+      class="particle-dot"
+      style=${`left:${d.left};top:${d.top};width:${d.size}px;height:${d.size}px;animation-delay:${d.delay};animation-duration:${d.dur}`}
+    ></span>`)}
+  </div>`;
 }
 
 // ─────────────────────── Экран экстренной блокировки (Esc × 2) ───────────────────────

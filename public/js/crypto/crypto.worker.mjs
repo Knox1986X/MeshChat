@@ -5,8 +5,14 @@
 import {
   utf8ToBytes,
   bytesToUtf8,
+  randomBytes,
   toBase64Url,
   fromBase64Url,
+  aesGcmEncrypt,
+  aesGcmDecrypt,
+  padPayload,
+  unpadPayload,
+  sha256,
   wipe,
 } from '../../../shared/crypto/primitives.mjs';
 import {
@@ -14,6 +20,7 @@ import {
   computeAuthChallengeProof,
   createZkAuthRegistration,
   signZkLoginChallenge,
+  signZkChallengeWithNativeKey,
   solveProofOfWork,
   generateRecoveryKey,
   encryptRecoveryBundle,
@@ -91,18 +98,146 @@ export class CryptoEngine {
 
   /** Подготовка асимметричной Zero-Knowledge регистрации (пароль не покидает воркер) */
   async prepareZkRegistration({ username, password, algorithm = 'auto' }) {
-    return createZkAuthRegistration(username, password, { algorithm });
+    await this.store.open();
+    const reg = await createZkAuthRegistration(username, password, { algorithm });
+    if (reg.authPrivKey) {
+      await this.store.putNativeKey('me:zkAuthPriv', reg.authPrivKey);
+    }
+    await this.store.putEncryptedRecord('me:zkTicket', {
+      username: reg.username,
+      authPubB64: reg.authPubB64,
+      encryptedAuthKey: reg.encryptedAuthKey,
+    });
+    const { authPrivKey, ...safeResult } = reg;
+    return safeResult;
   }
 
   /** Подпись серверного challenge при входе (пароль не покидает воркер) */
   async solveZkLogin({ username, password, encryptedAuthKey, challengeNonce, algorithm = 'auto' }) {
-    return signZkLoginChallenge({
+    await this.store.open();
+    const res = await signZkLoginChallenge({
       username,
       password,
       encryptedAuthKey,
       challengeNonce,
+      returnKeyPair: true,
       options: { algorithm },
     });
+    if (res.authPrivKey) {
+      await this.store.putNativeKey('me:zkAuthPriv', res.authPrivKey);
+    }
+    const prev = (await this.store.getEncryptedRecord('me:zkTicket')) || {};
+    await this.store.putEncryptedRecord('me:zkTicket', {
+      ...prev,
+      username: String(username || '').trim().toLowerCase(),
+      encryptedAuthKey,
+    });
+    return res.signatureB64;
+  }
+
+  /** Мгновенная подпись challenge неизвлекаемым ключом без повторного ввода пароля */
+  async signStoredZkChallenge({ username, challengeNonce }) {
+    await this.store.open();
+    const authPriv = await this.store.getNativeKey('me:zkAuthPriv');
+    if (!authPriv) {
+      throw new Error('NO_STORED_ZK_KEY');
+    }
+    return signZkChallengeWithNativeKey(authPriv, username, challengeNonce);
+  }
+
+  /** Сохранение метаданных ZK-билета для прозрачного самовосстановления сессии на ретрансляторе */
+  async saveZkMetadata({ username, authPubB64, encryptedAuthKey, encryptedRecovery }) {
+    await this.store.open();
+    const prev = (await this.store.getEncryptedRecord('me:zkTicket')) || {};
+    await this.store.putEncryptedRecord('me:zkTicket', {
+      username: username || prev.username || null,
+      authPubB64: authPubB64 || prev.authPubB64 || null,
+      encryptedAuthKey: encryptedAuthKey || prev.encryptedAuthKey || null,
+      encryptedRecovery: encryptedRecovery !== undefined ? encryptedRecovery : (prev.encryptedRecovery || null),
+    });
+    return { saved: true };
+  }
+
+  /** Экспорт публичного комплекта для прозрачной перерегистрации на перезапущенном эфемерном ретрансляторе */
+  async exportRelayRehydrationPackage({ opkCount = 30 } = {}) {
+    return this._runSerialized(async () => {
+      await this.init();
+      this._requireIdentity();
+      const ticket = await this.store.getEncryptedRecord('me:zkTicket');
+      if (!ticket?.username || !ticket?.authPubB64 || !ticket?.encryptedAuthKey) {
+        throw new Error('MISSING_ZK_REHYDRATION_TICKET');
+      }
+      const counters = (await this.store.getEncryptedRecord('me:counters')) || {
+        nextSpkId: 2,
+        nextOpkId: 200,
+        activeSpkId: 1,
+      };
+      let spkMeta = counters.activeSpkId
+        ? await this.store.getEncryptedRecord(`spkMeta:${counters.activeSpkId}`)
+        : null;
+      if (!spkMeta?.publicPreKey) {
+        const spkId = counters.nextSpkId || Math.floor(Date.now() / 1000);
+        const spk = await generateSignedPreKey(this.identity.privateKeys.ikSignPriv, spkId, { extractable: false });
+        await this.store.putNativeKey(`spk:${spk.keyId}`, spk.privateKey);
+        spkMeta = {
+          keyId: spk.keyId,
+          pubRawB64: toBase64Url(spk.publicKeyRaw),
+          publicPreKey: spk.publicPreKey,
+        };
+        await this.store.putEncryptedRecord(`spkMeta:${spk.keyId}`, spkMeta);
+        counters.activeSpkId = spk.keyId;
+        counters.nextSpkId = spk.keyId + 1;
+      }
+      const startOpk = counters.nextOpkId || 200;
+      const opks = await generateOneTimePreKeys(startOpk, opkCount, { extractable: false });
+      for (const item of opks) {
+        await this.store.putNativeKey(`opk:${item.keyId}`, item.privateKey);
+      }
+      counters.nextOpkId = startOpk + opkCount;
+      await this.store.putEncryptedRecord('me:counters', counters);
+
+      return {
+        username: ticket.username,
+        authPubB64: ticket.authPubB64,
+        encryptedAuthKey: ticket.encryptedAuthKey,
+        encryptedRecovery: ticket.encryptedRecovery || null,
+        publicBundle: {
+          identity: this.identity.publicIdentity,
+          signedPreKey: spkMeta.publicPreKey,
+          oneTimePreKeys: opks.map(o => o.publicPreKey),
+        },
+      };
+    });
+  }
+
+  /** Локальный криптографический эхо-тест (AES-256-GCM + ISO/IEC 7816-4 выравнивание 512 Б + SHA-256) */
+  async loopbackSelfTest({ text = 'MeshChat E2EE Loopback Test' } = {}) {
+    await this.store.open();
+    const started = performance.now();
+    const raw = utf8ToBytes(String(text));
+    const padded = padPayload(raw);
+    const iv = randomBytes(12);
+    const aad = utf8ToBytes('MESHCHAT-LOOPBACK-E2EE-v1');
+    const ct = await aesGcmEncrypt(this.store._masterKey, iv, padded, aad);
+    const digest = await sha256(ct);
+    const hexPrefix = Array.from(digest.slice(0, 8))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    const ptPadded = await aesGcmDecrypt(this.store._masterKey, iv, ct, aad);
+    const unpadded = unpadPayload(ptPadded);
+    const decoded = bytesToUtf8(unpadded);
+    const elapsedMs = Math.max(1, Math.round((performance.now() - started) * 10) / 10);
+    wipe(raw);
+    wipe(padded);
+    wipe(ptPadded);
+    wipe(unpadded);
+    return {
+      ok: decoded === String(text),
+      decryptedText: decoded,
+      paddedBytes: ct.byteLength,
+      sha256Prefix: hexPrefix,
+      elapsedMs,
+    };
   }
 
   /** Решение анти-спам задачи Proof-of-Work в фоновом потоке */
@@ -133,7 +268,7 @@ export class CryptoEngine {
       pubRawB64: toBase64Url(spk.publicKeyRaw),
       publicPreKey: spk.publicPreKey,
     });
-    await this.store.putEncryptedRecord('me:counters', { nextSpkId: 2, nextOpkId: 1 + opkCount });
+    await this.store.putEncryptedRecord('me:counters', { nextSpkId: 2, nextOpkId: 1 + opkCount, activeSpkId: 1 });
 
     const opks = await generateOneTimePreKeys(1, opkCount, { extractable: false });
     for (const item of opks) {
@@ -145,6 +280,11 @@ export class CryptoEngine {
       const recoveryKey = generateRecoveryKey();
       const encryptedBackup = await encryptRecoveryBundle(generated.recoveryMaterial, recoveryKey);
       recoveryKit = { recoveryKey, encryptedBackup };
+      const prevTicket = (await this.store.getEncryptedRecord('me:zkTicket')) || {};
+      await this.store.putEncryptedRecord('me:zkTicket', {
+        ...prevTicket,
+        encryptedRecovery: encryptedBackup,
+      });
     }
 
     return {
@@ -174,6 +314,16 @@ export class CryptoEngine {
       keyId: spk.keyId,
       pubRawB64: toBase64Url(spk.publicKeyRaw),
       publicPreKey: spk.publicPreKey,
+    });
+    await this.store.putEncryptedRecord('me:counters', {
+      nextSpkId: spkId + 1,
+      nextOpkId: 1 + opkCount,
+      activeSpkId: spk.keyId,
+    });
+    const prevTicket = (await this.store.getEncryptedRecord('me:zkTicket')) || {};
+    await this.store.putEncryptedRecord('me:zkTicket', {
+      ...prevTicket,
+      encryptedRecovery: encryptedBackup,
     });
     const opks = await generateOneTimePreKeys(1, opkCount, { extractable: false });
     for (const item of opks) {

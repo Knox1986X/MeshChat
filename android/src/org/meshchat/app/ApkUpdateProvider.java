@@ -15,7 +15,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 
 public final class ApkUpdateProvider extends ContentProvider {
-    public static final String AUTHORITY = "org.meshchat.app.apkprovider";
+    public static final String AUTHORITY = "io.meshchat.app.apkprovider";
 
     public static File getUpdatesDir(android.content.Context ctx) {
         File dir = new File(ctx.getCacheDir(), "updates");

@@ -22,8 +22,8 @@ test('Автообновление: /api/version отдаёт верный build
 
     assert.equal(ver.ok, true);
     assert.equal(ver.app, 'MeshChat');
-    assert.equal(ver.version, '1.2.0');
-    assert.equal(ver.versionCode, 3);
+    assert.equal(ver.version, '1.3.0');
+    assert.equal(ver.versionCode, 4);
     assert.match(ver.buildHash, /^[a-f0-9]{12}$/);
     assert.equal(ver.githubRepo, 'Knox1986X/MeshChat');
 

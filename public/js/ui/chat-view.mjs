@@ -1,5 +1,5 @@
-// Центральная панель зашифрованного диалога: строгий заголовок сессии,
-// лента сообщений с индикацией статуса ретрансляции, однократными вложениями [1×] и панелью ввода.
+// Центральная панель зашифрованного диалога: заголовок с кастомным профилем собеседника,
+// лента сообщений с индикацией доставки, однократными вложениями [1×], реакциями и вводом.
 
 import { html, useState, useRef, useEffect } from '../../vendor/preact.mjs';
 import {
@@ -8,13 +8,16 @@ import {
   sendChatMessage,
   sendEncryptedAttachment,
   openEncryptedMedia,
-  openSafetyVerificationModal,
+  openPeerProfileModal,
+  togglePinChat,
   blockAnonQuestionAuthor,
   toggleBossMode,
   showToast,
 } from '../store/app-store.mjs';
 import {
   Icon,
+  AvatarBox,
+  ProfileBadgeIcon,
   RichMessageText,
   formatTime,
   formatDatePill,
@@ -23,7 +26,7 @@ import {
 } from './boss-screen.mjs';
 
 function statusLabel(status) {
-  if (status === 'sending') return 'Отправка';
+  if (status === 'sending') return 'Шифрование';
   if (status === 'queued') return 'В очереди';
   return 'Доставлено';
 }
@@ -47,15 +50,16 @@ export function ChatView() {
   if (!chat) {
     return html`<main class="chat-pane empty-pane">
       <div class="empty-card">
-        <div class="empty-icon"><${Icon} name="shield" size=${32} /></div>
-        <h2>Сквозное криптографическое шифрование</h2>
+        <div class="empty-icon"><${Icon} name="mesh" size=${34} /></div>
+        <h2>Сквозное шифрование Signal Protocol</h2>
         <p>
-          Сообщения защищены протоколом <b>X3DH + Double Ratchet</b> (NIST P-256, HKDF-SHA256, AES-256-GCM)
-          и передаются в обезличенных конвертах <b>Sealed Sender</b>. Узел ретрансляции не хранит граф связей и IP.
+          Все сообщения, файлы и кастомные профили защищены <b>X3DH + Double Ratchet</b>
+          (NIST P-256, HKDF-SHA256, AES-256-GCM) в конвертах <b>Sealed Sender</b>.
+          Узел ретрансляции не хранит метаданные и IP-адреса.
         </p>
         <div class="empty-actions">
           <button type="button" class="btn-primary" onClick=${() => { store.ui.modal = 'new-chat'; notifyStore(); }}>
-            <${Icon} name="plus" size=${15} /> Открыть диалог
+            <${Icon} name="plus" size=${15} /> Новый диалог
           </button>
           <button type="button" class="btn-ghost" onClick=${() => toggleBossMode(true)}>
             <${Icon} name="eyeOff" size=${15} /> Блокировка (Esc×2)
@@ -65,7 +69,8 @@ export function ChatView() {
     </main>`;
   }
 
-  const initials = (chat.username || chat.title || '?').replace(/^@/, '').slice(0, 2).toUpperCase();
+  const displayTitle = chat.peerProfile?.displayName || chat.title;
+  const peerBadge = chat.peerProfile?.badge || (chat.verified ? 'verified' : 'none');
 
   const onSubmit = async (e) => {
     e?.preventDefault();
@@ -104,24 +109,32 @@ export function ChatView() {
       <button
         type="button"
         class="icon-btn mobile-back-btn"
-        title="Назад к списку сессий"
+        title="Назад к списку чатов"
         onClick=${() => { store.ui.activeChatId = null; notifyStore(); }}
-      ><${Icon} name="back" size=${19} /></button>
+      ><${Icon} name="back" size=${20} /></button>
 
-      <div class="chat-header-peer" onClick=${() => chat.kind === 'dm' && openSafetyVerificationModal(chat.id)}>
-        <div class="avatar small" style=${`background:${chat.avatarColor || '#1E3A5F'}`}>
-          ${chat.kind === 'ask' ? html`<${Icon} name="inbox" size=${16} />` : html`<span>${initials}</span>`}
-        </div>
-        <div>
-          <div class="peer-name">${chat.title}</div>
+      <div class="chat-header-peer" onClick=${() => chat.kind === 'dm' && openPeerProfileModal(chat.id)}>
+        <${AvatarBox}
+          title=${displayTitle}
+          username=${chat.username}
+          avatarDataUrl=${chat.peerProfile?.avatarDataUrl || ''}
+          color=${chat.avatarColor || '#3B4CCA'}
+          kind=${chat.kind}
+          size=${40}
+        />
+        <div class="peer-meta-col">
+          <div class="peer-name">
+            <span>${displayTitle}</span>
+            <${ProfileBadgeIcon} badge=${peerBadge} size=${13} />
+          </div>
           <div class="peer-sub">
-            <${Icon} name=${chat.verified ? 'shield' : 'lock'} size=${12} />
+            <${Icon} name=${chat.verified || chat.kind !== 'dm' ? 'shield' : 'lock'} size=${12} />
             <span>
-              ${chat.kind === 'ask'
-                ? 'Внешний E2E-шлюз приёма обращений'
-                : chat.verified
-                  ? 'Отпечаток верифицирован · Double Ratchet'
-                  : 'E2E активно · Сверка отпечатка'}
+              ${chat.kind === 'echo'
+                ? 'Локальный сейф и самопроверка AES-256-GCM'
+                : chat.kind === 'ask'
+                  ? 'Внешний E2E-шлюз приёма обращений'
+                  : chat.peerProfile?.statusText || (chat.verified ? 'Ключ подтверждён · Double Ratchet' : `@${chat.username} · нажмите для профиля`)}
             </span>
             ${chat.ttlSec > 0 && html`<span class="ttl-pill">TTL ${ttlText(chat.ttlSec)}</span>`}
           </div>
@@ -131,10 +144,17 @@ export function ChatView() {
       <div class="chat-header-actions">
         <button
           type="button"
+          class=${`circle-btn ghost ${chat.pinned ? 'active' : ''}`}
+          title=${chat.pinned ? 'Открепить чат' : 'Закрепить чат'}
+          onClick=${() => togglePinChat(chat.id)}
+        ><${Icon} name="pin" size=${15} /></button>
+
+        <button
+          type="button"
           class="circle-btn ghost"
           title="Экстренная блокировка экрана (двойной Esc)"
           onClick=${() => toggleBossMode(true)}
-        ><${Icon} name="eyeOff" size=${16} /></button>
+        ><${Icon} name="eyeOff" size=${15} /></button>
 
         ${chat.kind === 'dm' && html`<button
           type="button"
@@ -146,9 +166,9 @@ export function ChatView() {
         <button
           type="button"
           class=${`circle-btn blue ${ui.inspectorOpen ? 'active' : ''}`}
-          title="Сведения о сессии и криптографии"
+          title="Параметры шифрования и TTL"
           onClick=${() => { store.ui.inspectorOpen = !store.ui.inspectorOpen; notifyStore(); }}
-        ><${Icon} name="info" size=${16} /></button>
+        ><${Icon} name="info" size=${15} /></button>
       </div>
     </header>
 
@@ -166,14 +186,19 @@ export function ChatView() {
           ${showDay && html`<div class="date-pill-wrap"><span class="date-pill">${dayStr}</span></div>`}
 
           <div class=${`msg-row ${m.out ? 'outgoing' : 'incoming'}`}>
-            ${!m.out && html`<div class="avatar tiny" style=${`background:${chat.avatarColor || '#1E3A5F'}`}>
-              ${chat.kind === 'ask' ? html`<${Icon} name="inbox" size=${13} />` : initials}
-            </div>`}
+            ${!m.out && html`<${AvatarBox}
+              title=${displayTitle}
+              username=${chat.username}
+              avatarDataUrl=${chat.peerProfile?.avatarDataUrl || ''}
+              color=${chat.avatarColor || '#3B4CCA'}
+              kind=${chat.kind}
+              size=${30}
+            />`}
 
             <div class=${`msg-bubble ${m.out ? 'bubble-out' : isSystemNotice ? 'bubble-amber' : 'bubble-in'}`}>
               <div class="msg-meta-top">
                 <span class="msg-author">
-                  ${m.out ? 'Вы' : m.type === 'ask' ? 'Внешний отправитель (E2E)' : chat.title}
+                  ${m.out ? 'Вы' : m.type === 'ask' ? 'Анонимный отправитель (E2E)' : displayTitle}
                 </span>
                 <span class="msg-time">
                   ${formatTime(m.ts)}
@@ -227,7 +252,7 @@ export function ChatView() {
                 </button>
               </div>`}
 
-              ${chat.kind === 'dm' && html`<div class="msg-hover-bar">
+              ${(chat.kind === 'dm' || chat.kind === 'echo') && html`<div class="msg-hover-bar">
                 <button
                   type="button"
                   title="Цитировать сообщение"
@@ -273,17 +298,19 @@ export function ChatView() {
               onClick=${() => fileInputRef.current?.click()}
             ><${Icon} name="clip" size=${17} /></button>
 
-            <button
+            ${chat.kind === 'dm' && html`<button
               type="button"
               class=${`composer-icon ${onceToggle ? 'once-active' : ''}`}
               title="Однократный просмотр [1×]: физическое удаление с узла после первого чтения"
               onClick=${() => setOnceToggle((v) => !v)}
-            ><${Icon} name="once" size=${17} /></button>
+            ><${Icon} name="once" size=${17} /></button>`}
 
             <input
               class="composer-input"
               type="text"
-              placeholder=${'Введите сообщение… (||скрытый||, **выделение**, `код`)'}
+              placeholder=${chat.kind === 'echo'
+                ? 'Введите текст для эхо-проверки E2EE или заметку…'
+                : 'Сообщение… (||скрытый||, **жирный**, `код`)'}
               value=${draft}
               onInput=${(e) => setDraft(e.target.value)}
             />

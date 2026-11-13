@@ -1,10 +1,10 @@
-// Модуль безопасного автообновления MeshChat для Android:
-// скачивает новый APK (с поддержкой 302 редиректов GitHub Releases), сверяет SHA-256 хеш
-// до вызова установщика и открывает системный диалог обновления поверх текущей версии.
+// Модуль безопасного самообновления Android-приложения MeshChat через GitHub Releases и узел:
+//   1. Скачивает APK с поддержкой кросс-доменных 302-редиректов GitHub -> objects.githubusercontent.com.
+//   2. Проверяет контрольную сумму SHA-256 до байта перед передачей системному установщику.
+//   3. Вызывает установщик пакета с EXTRA_NOT_UNKNOWN_SOURCE для бесшовного обновления поверх текущей версии.
 
 package org.meshchat.app;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -16,124 +16,147 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.Locale;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class MeshUpdater {
-    public interface ProgressListener {
-        void onProgress(int percent, String statusText, String errorText);
-    }
-
-    private static final String APK_FILENAME = "MeshChat-update.apk";
-    private final Activity activity;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final MainActivity activity;
+    private volatile boolean downloading = false;
     private volatile File readyApkFile = null;
 
-    public MeshUpdater(Activity activity) {
+    public interface ProgressListener {
+        void onUpdate(int percent, String status, String error);
+    }
+
+    public MeshUpdater(MainActivity activity) {
         this.activity = activity;
     }
 
-    public void downloadAndInstall(final String apkUrl, final String expectedSha256, final ProgressListener listener) {
-        executor.execute(() -> {
-            File target = new File(ApkUpdateProvider.getUpdatesDir(activity), APK_FILENAME);
-            try {
-                listener.onProgress(5, "Соединение с сервером обновлений…", null);
+    public void downloadAndInstall(String apkUrl, String expectedSha256, ProgressListener listener) {
+        if (downloading) return;
+        downloading = true;
 
-                HttpURLConnection conn = openFollowingRedirects(apkUrl);
-                int code = conn.getResponseCode();
-                if (code < 200 || code >= 300) {
-                    throw new IllegalStateException("Сервер обновлений вернул HTTP " + code);
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                listener.onUpdate(3, "Подключение к серверу релизов…", null);
+
+                String currentUrl = apkUrl;
+                for (int hop = 0; hop < 6; hop++) {
+                    URL url = new URL(currentUrl);
+                    conn = (HttpURLConnection) url.openConnection();
+                    conn.setInstanceFollowRedirects(false);
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(45000);
+                    conn.setRequestProperty("Accept", "application/octet-stream,*/*");
+                    conn.setRequestProperty("User-Agent", "MeshChat-Android-Updater/1.3");
+
+                    int code = conn.getResponseCode();
+                    if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                        String loc = conn.getHeaderField("Location");
+                        conn.disconnect();
+                        if (loc == null || loc.isEmpty()) {
+                            throw new IllegalStateException("Пустой заголовок редиректа при скачивании APK");
+                        }
+                        currentUrl = new URL(url, loc).toString();
+                        continue;
+                    }
+                    if (code != 200) {
+                        throw new IllegalStateException("Сервер релизов вернул HTTP " + code);
+                    }
+                    break;
                 }
 
-                String headerSha = conn.getHeaderField("x-apk-sha256");
-                String shaToVerify = (expectedSha256 != null && expectedSha256.length() == 64)
-                        ? expectedSha256.toLowerCase(Locale.ROOT)
-                        : (headerSha != null && headerSha.length() == 64 ? headerSha.toLowerCase(Locale.ROOT) : "");
+                if (conn == null) {
+                    throw new IllegalStateException("Не удалось открыть соединение загрузки");
+                }
 
-                long totalBytes = conn.getContentLengthLong();
+                int totalBytes = conn.getContentLength();
+                File dir = new File(activity.getCacheDir(), "updates");
+                if (!dir.exists()) {
+                    // noinspection ResultOfMethodCallIgnored
+                    dir.mkdirs();
+                }
+                File tmpFile = new File(dir, "MeshChat-update.apk.part");
+                File finalFile = new File(dir, "MeshChat-update.apk");
+
                 MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+                long downloaded = 0;
+                int lastReportedPct = 3;
 
                 try (InputStream in = conn.getInputStream();
-                     FileOutputStream fos = new FileOutputStream(target)) {
+                     FileOutputStream out = new FileOutputStream(tmpFile)) {
                     byte[] buf = new byte[16384];
-                    long readTotal = 0;
-                    int lastReported = 5;
                     int n;
-                    while ((n = in.read(buf)) >= 0) {
-                        fos.write(buf, 0, n);
+                    while ((n = in.read(buf)) != -1) {
+                        out.write(buf, 0, n);
                         sha256.update(buf, 0, n);
-                        readTotal += n;
+                        downloaded += n;
                         if (totalBytes > 0) {
-                            int pct = (int) Math.min(94, 5 + (readTotal * 89) / totalBytes);
-                            if (pct >= lastReported + 4) {
-                                lastReported = pct;
-                                listener.onProgress(pct, "Скачивание пакета: " + pct + "%…", null);
+                            int pct = (int) Math.min(98, (downloaded * 100L) / totalBytes);
+                            if (pct >= lastReportedPct + 3) {
+                                lastReportedPct = pct;
+                                listener.onUpdate(pct, "Скачивание релиза: " + pct + "%", null);
                             }
                         }
                     }
-                    fos.getFD().sync();
+                    out.getFD().sync();
                 }
 
-                listener.onProgress(96, "Проверка криптографической контрольной суммы SHA-256…", null);
-                String actualSha = toHex(sha256.digest());
-                if (!shaToVerify.isEmpty() && !shaToVerify.equalsIgnoreCase(actualSha)) {
-                    target.delete();
-                    throw new SecurityException("Контрольная сумма SHA-256 не совпала! Пакет отклонён.");
+                String actualHex = toHex(sha256.digest());
+                if (expectedSha256 != null && expectedSha256.trim().length() == 64) {
+                    if (!actualHex.equalsIgnoreCase(expectedSha256.trim())) {
+                        // noinspection ResultOfMethodCallIgnored
+                        tmpFile.delete();
+                        throw new SecurityException("Несовпадение контрольной суммы SHA-256 пакета");
+                    }
                 }
 
-                readyApkFile = target;
-                listener.onProgress(100, "Пакет проверен. Открываю установщик Android…", null);
+                if (finalFile.exists()) {
+                    // noinspection ResultOfMethodCallIgnored
+                    finalFile.delete();
+                }
+                if (!tmpFile.renameTo(finalFile)) {
+                    throw new IllegalStateException("Не удалось подготовить файл обновления");
+                }
+
+                readyApkFile = finalFile;
+                listener.onUpdate(100, "SHA-256 подтверждён · Запуск системного обновления…", null);
                 activity.runOnUiThread(this::triggerPackageInstallerIfPermitted);
-            } catch (Exception err) {
-                target.delete();
-                listener.onProgress(0, "", "Ошибка автообновления: " + err.getMessage());
+            } catch (Exception e) {
+                listener.onUpdate(0, "", "Ошибка автообновления: " + e.getMessage());
+            } finally {
+                if (conn != null) conn.disconnect();
+                downloading = false;
             }
-        });
+        }, "meshchat-apk-updater").start();
     }
 
     public void triggerPackageInstallerIfPermitted() {
         if (readyApkFile == null || !readyApkFile.exists()) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                && !activity.getPackageManager().canRequestPackageInstalls()) {
-            Intent permIntent = new Intent(
-                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:" + activity.getPackageName())
-            );
-            activity.startActivityForResult(permIntent, MainActivity.REQ_INSTALL_UNKNOWN_APPS);
-            return;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!activity.getPackageManager().canRequestPackageInstalls()) {
+                Intent permIntent = new Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + activity.getPackageName())
+                );
+                activity.startActivityForResult(permIntent, MainActivity.REQ_INSTALL_UNKNOWN_APPS);
+                return;
+            }
         }
-        Uri contentUri = ApkUpdateProvider.buildUriForFile(readyApkFile.getName());
+
+        Uri apkUri = ApkUpdateProvider.buildUriForFile(readyApkFile.getName());
         Intent install = new Intent(Intent.ACTION_VIEW);
-        install.setDataAndType(contentUri, "application/vnd.android.package-archive");
+        install.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        install.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
         install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         activity.startActivity(install);
     }
 
-    private static HttpURLConnection openFollowingRedirects(String initialUrl) throws Exception {
-        String current = initialUrl;
-        for (int hops = 0; hops < 6; hops++) {
-            HttpURLConnection conn = (HttpURLConnection) new URL(current).openConnection();
-            conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
-            conn.setRequestProperty("User-Agent", "MeshChat-Updater/1.1");
-            int status = conn.getResponseCode();
-            if (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) {
-                String next = conn.getHeaderField("Location");
-                conn.disconnect();
-                if (next == null || next.isEmpty()) break;
-                current = new URL(new URL(current), next).toString();
-                continue;
-            }
-            return conn;
+    private static String toHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b & 0xff));
         }
-        throw new IllegalStateException("Слишком много перенаправлений при загрузке APK");
-    }
-
-    private static String toHex(byte[] b) {
-        StringBuilder sb = new StringBuilder(b.length * 2);
-        for (byte v : b) sb.append(String.format("%02x", v & 0xFF));
         return sb.toString();
     }
 }
