@@ -1,9 +1,10 @@
-// Утилиты UI, встроенные SVG-иконки, синтезатор звуков WebAudio (0 КБ ассетов),
-// безопасный рендер спойлеров «под фиговым листком» (||секрет||) и экран «Прикрыться» (BossScreen).
+// Базовые утилиты интерфейса: векторные иконки (0 сетевых запросов),
+// синтезатор сдержанных системных сигналов WebAudio, рендер скрытого текста (||...||)
+// и экран экстренной маскировки рабочего окна (двойной Esc).
 
 import { html, useState } from '../../vendor/preact.mjs';
 
-// ─────────────────────── Синтез звуков WebAudio ───────────────────────
+// ─────────────────────── Синтез коротких системных сигналов WebAudio ───────────────────────
 
 let audioCtx = null;
 function getAudio() {
@@ -15,7 +16,7 @@ function getAudio() {
   return audioCtx;
 }
 
-function synthTone(freq, delay, duration, { type = 'sine', gain = 0.08, endFreq = null } = {}) {
+function synthTone(freq, delay, duration, { type = 'sine', gain = 0.05, endFreq = null } = {}) {
   const ctx = getAudio();
   if (!ctx) return;
   const osc = ctx.createOscillator();
@@ -25,27 +26,27 @@ function synthTone(freq, delay, duration, { type = 'sine', gain = 0.08, endFreq 
   osc.frequency.setValueAtTime(freq, start);
   if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, start + duration);
   g.gain.setValueAtTime(0.0001, start);
-  g.gain.linearRampToValueAtTime(gain, start + 0.012);
+  g.gain.linearRampToValueAtTime(gain, start + 0.01);
   g.gain.exponentialRampToValueAtTime(0.0001, start + duration);
   osc.connect(g).connect(ctx.destination);
   osc.start(start);
-  osc.stop(start + duration + 0.03);
+  osc.stop(start + duration + 0.025);
 }
 
 export function playSfx(kind) {
   try {
     if (kind === 'sent') {
-      synthTone(540, 0, 0.08, { endFreq: 880, gain: 0.06 });
+      synthTone(520, 0, 0.055, { endFreq: 680, gain: 0.04 });
     } else if (kind === 'incoming') {
-      synthTone(740, 0, 0.1, { gain: 0.09 });
-      synthTone(1110, 0.09, 0.2, { gain: 0.08 });
+      synthTone(640, 0, 0.075, { gain: 0.055 });
+      synthTone(860, 0.075, 0.11, { gain: 0.05 });
     } else if (kind === 'burn') {
-      synthTone(420, 0, 0.15, { type: 'triangle', endFreq: 140, gain: 0.09 });
+      synthTone(360, 0, 0.11, { type: 'triangle', endFreq: 180, gain: 0.05 });
     }
-  } catch { /* аудио недоступно до первого клика */ }
+  } catch { /* аудио недоступно до первого действия пользователя */ }
 }
 
-// ─────────────────────── Форматирование времени и размеров ───────────────────────
+// ─────────────────────── Форматирование времени и объёма данных ───────────────────────
 
 export function formatTime(ts) {
   if (!ts) return '';
@@ -70,25 +71,24 @@ export function formatBytes(bytes) {
 
 export const TTL_CHOICES = [
   [0, 'Выкл'],
-  [30, '30 секунд'],
-  [300, '5 минут'],
-  [3600, '1 час'],
-  [86400, '24 часа'],
-  [604800, '7 дней'],
+  [30, '30 сек'],
+  [300, '5 мин'],
+  [3600, '1 ч'],
+  [86400, '24 ч'],
+  [604800, '7 сут'],
 ];
 
 export function ttlText(sec) {
   const found = TTL_CHOICES.find(([v]) => v === Number(sec));
-  return found ? found[1] : `${sec} сек`;
+  return found ? found[1] : `${sec} с`;
 }
 
-// ─────────────────────── Безопасный рендер текста со спойлерами и кодом (0 XSS) ───────────────────────
+// ─────────────────────── Безопасный рендер текста, кода и скрытых блоков (0 XSS) ───────────────────────
 
 export function RichMessageText({ text }) {
   const [revealed, setRevealed] = useState({});
   if (!text) return null;
 
-  // Разбиваем строку на токены: ```code```, `inline`, ||спойлер|| и обычный текст
   const tokens = [];
   const regex = /(```[\s\S]*?```|`[^`\n]+`|\|\|[^|\n]+\|\|\|?|\*\*[^*\n]+\*\*)/g;
   let lastIdx = 0;
@@ -129,7 +129,7 @@ export function RichMessageText({ text }) {
         return html`<span
           key=${idx}
           class=${isOpen ? 'msg-spoiler open' : 'msg-spoiler'}
-          title="Нажмите, чтобы снять прикрытие"
+          title="Скрытый фрагмент — нажмите для чтения"
           onClick=${(e) => {
             e.stopPropagation();
             setRevealed((r) => ({ ...r, [idx]: !r[idx] }));
@@ -141,7 +141,7 @@ export function RichMessageText({ text }) {
   </span>`;
 }
 
-// ─────────────────────── Векторные иконки (встроенный SVG, 0 сетевых запросов) ───────────────────────
+// ─────────────────────── Строгие геометрические SVG-иконки ───────────────────────
 
 const ICON_PATHS = {
   lock: html`<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`,
@@ -158,8 +158,14 @@ const ICON_PATHS = {
   bell: html`<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>`,
   clock: html`<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>`,
   globe: html`<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>`,
-  flame: html`<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>`,
-  glasses: html`<circle cx="6" cy="15" r="4"/><circle cx="18" cy="15" r="4"/><path d="M14 15a2 2 0 0 0-4 0"/><path d="M2.5 13 5 7c.7-1.3 1.4-2 3-2"/><path d="M21.5 13 19 7c-.7-1.3-1.5-2-3-2"/>`,
+  eyeOff: html`<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="2" y1="2" x2="22" y2="22"/>`,
+  once: html`<rect x="3" y="3" width="18" height="18" rx="4" stroke-dasharray="3 2.5"/><path d="M10.5 9.5 12.5 8v8"/><path d="M10 16h5"/>`,
+  inbox: html`<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>`,
+  reply: html`<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>`,
+  copy: html`<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>`,
+  check: html`<polyline points="20 6 9 17 4 12"/>`,
+  server: html`<rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/>`,
+  wifi: html`<path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/>`,
   settings: html`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>`,
   chat: html`<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>`,
   users: html`<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>`,
@@ -176,14 +182,14 @@ export function Icon({ name, size = 18 }) {
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="1.9"
+    stroke-width="1.85"
     stroke-linecap="round"
     stroke-linejoin="round"
     aria-hidden="true"
   >${ICON_PATHS[name] || ICON_PATHS.info}</svg>`;
 }
 
-// ─────────────────────── Экран «Прикрыться» (Boss Screen, Esc Esc) ───────────────────────
+// ─────────────────────── Экран экстренной блокировки (Esc × 2) ───────────────────────
 
 const SAMPLE_ROWS = [
   ['Подразделение Север', '14 820,00', '15 100,00', '+1,89%', 'Согласовано'],
@@ -200,7 +206,7 @@ export function BossScreen({ title, onExit }) {
     <div class="boss-topbar">
       <span class="boss-badge">XLSX</span>
       <strong>${title || 'Финансовая_модель_Q4_консолидация.xlsx'}</strong>
-      <span class="boss-hint">Автосохранение включено · Двойной клик или Esc Esc для возврата</span>
+      <span class="boss-hint">Только чтение · Двойной клик или Esc×2 для разблокировки</span>
     </div>
     <div class="boss-formula">
       <span class="boss-cell-id">${selectedCell}</span>

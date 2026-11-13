@@ -54,6 +54,10 @@ export class FallbackTransport extends BaseTransport {
     return this._active?.id || null;
   }
 
+  get activeTransport() {
+    return this._active;
+  }
+
   async connect({ signal } = {}) {
     this._closedExplicitly = false;
     if (this._active?.isConnected) return;

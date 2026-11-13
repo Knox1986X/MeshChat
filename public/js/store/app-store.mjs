@@ -1,6 +1,6 @@
 // Центральное реактивное состояние мессенджера (Offline-First Store).
 // Связывает изолированный CryptoWorker, мультитранспортный канал, зашифрованную IndexedDB,
-// очередь гарантированной доставки Outbox и таймер автоудаления исчезающих сообщений (TTL).
+// последовательную очередь обработки конвертов, гарантированную доставку Outbox и жнец TTL.
 
 import { useReducer, useEffect } from '../../vendor/preact.mjs';
 import {
@@ -25,9 +25,10 @@ import { FallbackTransport } from '../transport/fallback-transport.mjs';
 import { EncryptedClientDb } from './idb-messages.mjs';
 import { playSfx } from '../ui/boss-screen.mjs';
 
+// Строгая приглушённая палитра идентификаторов контактов (графит, сталь, тёмный кобальт, хвоя)
 const AVATAR_PALETTE = [
-  '#6D60F6', '#4A78FF', '#DF9A57', '#EC6482',
-  '#2AD882', '#9B6BFF', '#38BDF8', '#F59E0B',
+  '#1E3A5F', '#1E40AF', '#0F4C5C', '#334155',
+  '#14532D', '#1E293B', '#1D4ED8', '#115E59',
 ];
 
 function pickColor(seedStr = '') {
@@ -36,8 +37,8 @@ function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.1.0';
-export const APP_VERSION_CODE = 2;
+export const APP_VERSION = '1.2.0';
+export const APP_VERSION_CODE = 3;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -78,6 +79,7 @@ export const store = {
 
   // Состояние сети, мультитранспорта и Android Mesh-узла
   transportState: TRANSPORT_STATE.DISCONNECTED,
+  sessionAuthenticated: false,
   activeTransportId: 'ws',
   rttMs: null,
   serverEndpoints: { onion: null, i2p: null },
@@ -99,16 +101,16 @@ export const store = {
     bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
   },
 
-  // Данные чатов и сообщений (расшифровываются из IndexedDB только в RAM)
-  chats: {},        // chatId -> chatObj
-  messages: {},     // chatId -> msgObj[]
-  outbox: [],       // очередь неотправленных пакетов при офлайне
+  // Данные чатов и сообщений (расшифровываются из IndexedDB только в ОЗУ)
+  chats: {},              // chatId -> chatObj
+  messages: {},           // chatId -> msgObj[]
+  outbox: [],             // очередь зашифрованных конвертов для гарантированной досылки
   decryptedMediaUrls: {}, // blobId -> objectURL
 
-  // Состояние интерфейса (адаптивно для Desktop 3-pane и Mobile 5-tab)
+  // Состояние интерфейса (Desktop 3-pane и Mobile)
   ui: {
     spaceFilter: 'all', // 'all' | 'rooms' | 'ask'
-    mobileTab: 'chats', // 'chats' | 'calls' | 'ask' | 'contacts' | 'profile'
+    mobileTab: 'chats',
     activeChatId: null,
     inspectorOpen: true,
     searchQuery: '',
@@ -161,10 +163,32 @@ const cryptoWorker = new CryptoWorkerClient('/js/crypto/crypto.worker.mjs');
 
 let activeTransport = null;
 let rpcChannel = null;
-let customTransportBuilder = null; // Подключается модулем FallbackTransport на шаге мультитранспорта
+let customTransportBuilder = null;
 let reconnectTimer = null;
+let authSyncPromise = null;
+let syncLoopTimer = null;
+let flushInFlight = false;
 
-/** Позволяет подключить оркестратор FallbackTransport (WS <-> WebRTC <-> Tor <-> I2P) */
+// Строго последовательная очередь входящих конвертов + защита от двойной обработки (push + pull)
+let incomingQueue = Promise.resolve();
+const processedEnvelopeIds = new Set();
+
+function rememberProcessedEnvelope(envId) {
+  if (!envId) return;
+  processedEnvelopeIds.add(envId);
+  if (processedEnvelopeIds.size > 1500) {
+    const oldest = processedEnvelopeIds.values().next().value;
+    processedEnvelopeIds.delete(oldest);
+  }
+}
+
+function enqueueIncomingTask(fn) {
+  const next = incomingQueue.then(fn, fn);
+  incomingQueue = next.catch(() => {});
+  return next;
+}
+
+/** Позволяет подключить внешний оркестратор транспорта (для автотестов и кастомных сборок) */
 export function registerTransportOrchestrator(builderFn) {
   customTransportBuilder = builderFn;
 }
@@ -174,13 +198,12 @@ async function computeMailboxWriteProof(writeToken, bytes) {
   return toBase64Url(mac);
 }
 
-/** Вычисляет полный HTTP URL для API с учётом пользовательского узла MeshChat */
+/** Вычисляет полный HTTP URL для API с учётом выбранного узла MeshChat */
 export function resolveApiUrl(pathname) {
   const raw = (store.settings.serverUrl || '').trim().replace(/\/+$/, '');
   if (!raw) return pathname;
   try {
     const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
-    // Внутри Android APK .onion HTTP-запросы прозрачно проксируются локальным Orbot-мостом
     if (u.hostname.endsWith('.onion') && globalThis.MeshChatAndroid) {
       return pathname;
     }
@@ -229,13 +252,34 @@ export function toggleAndroidLanMesh() {
     store.android.lanUrl = st.url || '';
     showToast(
       store.android.lanMeshRunning
-        ? `Wi-Fi Mesh запущен: ${store.android.lanUrl}`
-        : 'Локальная раздача Wi-Fi Mesh остановлена'
+        ? `Локальный ретранслятор запущен: ${store.android.lanUrl}`
+        : 'Локальный ретранслятор остановлен'
     );
     notifyStore();
   } catch (err) {
     showToast(err.message, 'err');
   }
+}
+
+/** Нормализует устаревшие названия системного чата при загрузке из локальной БД */
+function normalizeStoredChats(chatsObj) {
+  if (!chatsObj || typeof chatsObj !== 'object') return {};
+  if (chatsObj['ask:inbox']) {
+    chatsObj['ask:inbox'].title = 'Входящий шлюз E2E';
+    chatsObj['ask:inbox'].avatarColor = '#1E3A5F';
+    if (typeof chatsObj['ask:inbox'].lastPreview === 'string') {
+      chatsObj['ask:inbox'].lastPreview = chatsObj['ask:inbox'].lastPreview.replace(/^🎭\s*/, '');
+    }
+  }
+  for (const c of Object.values(chatsObj)) {
+    if (c && typeof c.lastPreview === 'string') {
+      c.lastPreview = c.lastPreview
+        .replace(/^🔥\s*Одноразовое медиа/u, '[1×] Вложение')
+        .replace(/^📎\s*/u, '[Файл] ')
+        .replace(/^🎭\s*/u, '');
+    }
+  }
+  return chatsObj;
 }
 
 export async function bootClientApp() {
@@ -247,7 +291,7 @@ export async function bootClientApp() {
     if (savedSettings) Object.assign(store.settings, savedSettings);
     syncAndroidNativeBridge();
 
-    // Узнаём у сервера, подняты ли зеркала .onion / .i2p и хеш текущей сборки
+    // Опрашиваем узел о зеркалах .onion / .i2p и хеше текущей сборки
     fetch(resolveApiUrl('/api/health'))
       .then((r) => r.json())
       .then((h) => {
@@ -267,7 +311,6 @@ export async function bootClientApp() {
       })
       .catch(() => {});
 
-    // Подписка на прогресс скачивания и проверки SHA-256 нового APK из Java
     if (typeof globalThis !== 'undefined') {
       globalThis.__onMeshChatUpdateProgress = (pct, statusText, errMsg) => {
         store.update.progress = Number(pct) || 0;
@@ -285,7 +328,7 @@ export async function bootClientApp() {
     const me = await clientDb.get('me', null);
     if (me?.token) {
       store.me = me;
-      store.chats = (await clientDb.get('chats', {})) || {};
+      store.chats = normalizeStoredChats((await clientDb.get('chats', {})) || {});
       store.messages = (await clientDb.get('messages', {})) || {};
       store.outbox = (await clientDb.get('outbox', [])) || [];
       const firstId = Object.keys(store.chats)[0] || null;
@@ -301,21 +344,57 @@ export async function bootClientApp() {
     notifyStore();
   }
 
-  // Запускаем ежесекундный жнец исчезающих сообщений (TTL Reaper) и фоновую проверку обновлений
+  // Ежесекундный жнец TTL + страховочная фоновая синхронизация ящика и очереди Outbox каждые 6 секунд
   setInterval(purgeExpiredMessagesTick, 1000);
+  clearInterval(syncLoopTimer);
+  syncLoopTimer = setInterval(() => {
+    if (!store.me) return;
+    if (!activeTransport?.isConnected) {
+      connectActiveTransport().catch(() => {});
+      return;
+    }
+    if (!store.sessionAuthenticated) {
+      authenticateAndSyncTransport().catch(() => {});
+      return;
+    }
+    syncMailbox().catch(() => {});
+    if (store.outbox.length > 0) flushOutbox().catch(() => {});
+  }, 6000);
+
   if (typeof window !== 'undefined') {
+    const onWakeUp = () => {
+      if (store.me) {
+        syncNow().catch(() => {});
+      }
+      if (store.settings.autoUpdateCheck !== false) {
+        checkForUpdates({ silent: true });
+      }
+    };
+
     setTimeout(() => {
       if (store.settings.autoUpdateCheck !== false) checkForUpdates({ silent: true });
     }, 3500);
     setInterval(() => {
       if (store.settings.autoUpdateCheck !== false) checkForUpdates({ silent: true });
     }, 5 * 60 * 1000);
+
     document.addEventListener?.('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && store.settings.autoUpdateCheck !== false) {
-        checkForUpdates({ silent: true });
-      }
+      if (document.visibilityState === 'visible') onWakeUp();
     });
+    window.addEventListener?.('online', onWakeUp);
+    window.addEventListener?.('focus', onWakeUp);
+    window.addEventListener?.('meshchat:resume', onWakeUp);
   }
+}
+
+/** Принудительная немедленная проверка канала, догрузка ящика и отправка очереди Outbox */
+export async function syncNow() {
+  if (!store.me) return;
+  if (!activeTransport || !activeTransport.isConnected) {
+    await connectActiveTransport();
+    return;
+  }
+  await authenticateAndSyncTransport();
 }
 
 /**
@@ -330,7 +409,6 @@ export async function checkForUpdates({ silent = false } = {}) {
   try {
     let foundUpdate = false;
 
-    // 1. Опрашиваем активный узел MeshChat (/api/version)
     try {
       const res = await fetch(resolveApiUrl('/api/version'), { cache: 'no-store' });
       if (res.ok) {
@@ -357,9 +435,8 @@ export async function checkForUpdates({ silent = false } = {}) {
           foundUpdate = true;
         }
       }
-    } catch { /* узел временно офлайн */ }
+    } catch { /* узел временно недоступен */ }
 
-    // 2. Если не включён строгий даркнет-режим, проверяем официальный канал GitHub Releases
     const strictAnon =
       store.settings.transportPolicy === TRANSPORT_POLICY.TOR_ONLY ||
       store.settings.transportPolicy === TRANSPORT_POLICY.I2P_ONLY;
@@ -387,15 +464,15 @@ export async function checkForUpdates({ silent = false } = {}) {
             foundUpdate = true;
           }
         }
-      } catch { /* нет доступа к GitHub API */ }
+      } catch { /* GitHub API недоступен */ }
     }
 
     store.update.lastCheckedAt = Date.now();
     if (!silent) {
       showToast(
         foundUpdate
-          ? `Доступно обновление MeshChat v${store.update.remoteVersion}!`
-          : `У вас установлена актуальная версия MeshChat v${APP_VERSION}`
+          ? `Доступно обновление MeshChat v${store.update.remoteVersion}`
+          : `Установлена актуальная версия MeshChat v${APP_VERSION}`
       );
     }
   } finally {
@@ -404,7 +481,6 @@ export async function checkForUpdates({ silent = false } = {}) {
   }
 }
 
-/** Применяет найденное обновление: SW Hot-Swap в браузере или SHA-256 APK-апдейтер в Android */
 export async function applyAppUpdate() {
   if (store.android.isApk && globalThis.MeshChatAndroid?.downloadAndInstallUpdate) {
     const url = store.update.apkUrl || `https://github.com/${GITHUB_REPO}/releases/latest/download/MeshChat.apk`;
@@ -416,7 +492,6 @@ export async function applyAppUpdate() {
     return;
   }
 
-  // В веб-клиенте обновляем Service Worker и бесшовно перезагружаем оболочку (ключи в IDB сохраняются)
   try {
     store.update.downloading = true;
     store.update.statusText = 'Обновление кеша оболочки…';
@@ -447,8 +522,60 @@ export function dismissUpdateBanner() {
 
 // ─────────────────────── Управление транспортом и синхронизацией ───────────────────────
 
-export async function connectActiveTransport() {
+/**
+ * Повторно авторизует сессию на активном сокете (подписывая mailboxId на мгновенные пуши),
+ * пополняет одноразовые ключи, выгружает входящий ящик и отправляет очередь Outbox.
+ * Вызывается при КАЖДОМ переходе транспорта в состояние CONNECTED (включая тихий реконнект FallbackTransport).
+ */
+async function authenticateAndSyncTransport(pendingBundleUpload = null) {
+  if (!rpcChannel || !activeTransport?.isConnected || !store.me?.token) return;
+  if (authSyncPromise) return authSyncPromise;
+
+  authSyncPromise = (async () => {
+    try {
+      const sessionInfo = (await rpcChannel.request('session.auth', { token: store.me.token })).data;
+      store.sessionAuthenticated = true;
+      store.me.mailboxId = sessionInfo.mailboxId;
+      store.me.mailboxWriteToken = sessionInfo.mailboxWriteToken;
+      await clientDb.set('me', store.me);
+
+      if (pendingBundleUpload) {
+        if (pendingBundleUpload.signedPreKey) {
+          await rpcChannel.request('keys.rotateSpk', { signedPreKey: pendingBundleUpload.signedPreKey });
+        }
+        if (pendingBundleUpload.oneTimePreKeys?.length) {
+          await rpcChannel.request('keys.replenishOpk', { oneTimePreKeys: pendingBundleUpload.oneTimePreKeys });
+        }
+      } else if (sessionInfo.remainingOpks < 20) {
+        const moreOpks = await cryptoWorker.call('replenishOneTimePreKeys', { count: 50 });
+        await rpcChannel.request('keys.replenishOpk', { oneTimePreKeys: moreOpks });
+      }
+
+      await syncMailbox();
+      await flushOutbox();
+      notifyStore();
+    } catch (err) {
+      store.sessionAuthenticated = false;
+      const msg = String(err?.message || '');
+      // Если токен отвергнут сервером (например, холодный перезапуск без S3 или отзыв сессии) — возвращаем на экран входа
+      if (msg.includes('Сессия недействительна') || msg.includes('401')) {
+        store.me = null;
+        await clientDb.set('me', null);
+        store.authError = 'Сессия на узле истекла или узел был перезапущен. Выполните вход повторно.';
+        notifyStore();
+      }
+    } finally {
+      authSyncPromise = null;
+    }
+  })();
+
+  return authSyncPromise;
+}
+
+export async function connectActiveTransport(pendingBundleUpload = null) {
   clearTimeout(reconnectTimer);
+  store.sessionAuthenticated = false;
+
   if (activeTransport) {
     await activeTransport.close('reconfigure').catch(() => {});
     activeTransport = null;
@@ -461,6 +588,7 @@ export async function connectActiveTransport() {
         policy: store.settings.transportPolicy,
         transportConfig: {
           url: resolveDirectWsUrl(),
+          pingIntervalMs: 18000,
           onionUrl: store.settings.onionUrl,
           i2pUrl: store.settings.i2pUrl,
           localBridgeUrl: store.settings.localBridgeUrl,
@@ -477,6 +605,7 @@ export async function connectActiveTransport() {
           sendSignal: async (peerId, signalObject) => {
             const chat = store.chats[`dm:${peerId}`];
             if (!chat || !rpcChannel) throw new Error('Контакт для P2P-сигналинга не открыт');
+            await ensureOutgoingSessionForChat(chat);
             const { sealedBytes } = await cryptoWorker.call('encryptMessageForPeer', {
               peerId,
               payloadObject: { kind: 'rtc-signal', signal: signalObject },
@@ -494,18 +623,6 @@ export async function connectActiveTransport() {
   activeTransport = transport;
   store.activeTransportId = transport.id;
 
-  transport.onStateChange((state, detail) => {
-    store.transportState = state;
-    if (detail?.activeId) store.activeTransportId = detail.activeId;
-    if (detail?.rttMs || transport.rttMs) store.rttMs = detail?.rttMs || transport.rttMs;
-    notifyStore();
-
-    if (state === TRANSPORT_STATE.DISCONNECTED && store.me) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(() => connectActiveTransport().catch(() => {}), 2500);
-    }
-  });
-
   if (!rpcChannel) {
     rpcChannel = new TransportRpcChannel(transport);
     bindServerPushEvents(rpcChannel);
@@ -513,50 +630,70 @@ export async function connectActiveTransport() {
     rpcChannel.attachTransport(transport);
   }
 
+  transport.onStateChange((state, detail) => {
+    if (activeTransport !== transport) return;
+    store.transportState = state;
+    if (detail?.activeId) store.activeTransportId = detail.activeId;
+    if (detail?.rttMs || transport.rttMs) store.rttMs = detail?.rttMs || transport.rttMs;
+
+    if (state === TRANSPORT_STATE.CONNECTED && store.me?.token) {
+      // Критично: при каждом внутреннем переподключении FallbackTransport заново привязываем mailboxId на сервере
+      store.sessionAuthenticated = false;
+      authenticateAndSyncTransport().catch(() => {});
+    } else if (state === TRANSPORT_STATE.DISCONNECTED && store.me) {
+      store.sessionAuthenticated = false;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connectActiveTransport().catch(() => {}), 2200);
+    }
+    notifyStore();
+  });
+
   try {
     await transport.connect();
     store.rttMs = transport.rttMs;
     if (store.me?.token) {
-      const sessionInfo = (await rpcChannel.request('session.auth', { token: store.me.token })).data;
-      store.me.mailboxId = sessionInfo.mailboxId;
-      store.me.mailboxWriteToken = sessionInfo.mailboxWriteToken;
-      await clientDb.set('me', store.me);
-
-      if (sessionInfo.remainingOpks < 20) {
-        const moreOpks = await cryptoWorker.call('replenishOneTimePreKeys', { count: 50 });
-        await rpcChannel.request('keys.replenishOpk', { oneTimePreKeys: moreOpks });
-      }
-      await syncMailbox();
-      await flushOutbox();
+      await authenticateAndSyncTransport(pendingBundleUpload);
     }
-  } catch (err) {
+  } catch {
     store.transportState = TRANSPORT_STATE.DISCONNECTED;
+    store.sessionAuthenticated = false;
     notifyStore();
     if (store.me) {
-      reconnectTimer = setTimeout(() => connectActiveTransport().catch(() => {}), 3500);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => connectActiveTransport().catch(() => {}), 3000);
     }
   }
 }
 
 function bindServerPushEvents(rpc) {
-  rpc.onEvent('mailbox.envelope', async (meta, sealedBytes) => {
-    await processIncomingEnvelope(meta.id, sealedBytes);
-  });
-
-  rpc.onEvent('ask.new', async (askItem) => {
-    await processIncomingAsk(askItem);
-  });
-
-  rpc.onEvent('webrtc.signal', async (_meta, sealedBytes) => {
-    try {
-      const dec = await cryptoWorker.call('decryptIncomingEnvelope', { sealedBytes });
-      if (dec?.payloadObject?.kind === 'rtc-signal') {
-        const inner = activeTransport?.activeTransport || activeTransport;
-        if (inner && typeof inner.handleIncomingSignal === 'function') {
-          await inner.handleIncomingSignal(dec.senderId, dec.payloadObject.signal);
-        }
+  rpc.onEvent('mailbox.envelope', (meta, sealedBytes) => {
+    const copy = new Uint8Array(sealedBytes);
+    enqueueIncomingTask(async () => {
+      if (meta?.id && processedEnvelopeIds.has(meta.id)) {
+        rpc.request('mailbox.ack', { ids: [meta.id] }).catch(() => {});
+        return;
       }
-    } catch { /* игнорируем устаревший/чужой ICE-пакет */ }
+      await processIncomingEnvelope(meta?.id, copy);
+    });
+  });
+
+  rpc.onEvent('ask.new', (askItem) => {
+    enqueueIncomingTask(() => processIncomingAsk(askItem));
+  });
+
+  rpc.onEvent('webrtc.signal', (_meta, sealedBytes) => {
+    const copy = new Uint8Array(sealedBytes);
+    enqueueIncomingTask(async () => {
+      try {
+        const dec = await cryptoWorker.call('decryptIncomingSealedEnvelope', { sealedBytes: copy });
+        if (dec?.payload?.kind === 'rtc-signal') {
+          const inner = activeTransport?.activeTransport || activeTransport;
+          if (inner && typeof inner.handleIncomingSignal === 'function') {
+            await inner.handleIncomingSignal(dec.senderId, dec.payload.signal);
+          }
+        }
+      } catch { /* игнорируем устаревший пакет ICE */ }
+    });
   });
 
   rpc.onEvent('keys.lowOpk', async () => {
@@ -568,27 +705,36 @@ function bindServerPushEvents(rpc) {
 }
 
 async function syncMailbox() {
-  if (!rpcChannel || !store.me) return;
+  if (!rpcChannel || !store.me || !activeTransport?.isConnected) return;
   const { data } = await rpcChannel.request('mailbox.pull', { limit: 100 });
-  const ackIds = [];
-  for (const env of data.envelopes || []) {
-    try {
-      const bytes = fromBase64Url(env.blobB64);
-      await processIncomingEnvelope(env.id, bytes, { skipImmediateAck: true });
-      ackIds.push(env.id);
-    } catch (err) {
-      console.warn('[mailbox] ошибка обработки конверта:', err.message);
-      ackIds.push(env.id); // Удаляем битый конверт, чтобы не блокировать очередь
+
+  return enqueueIncomingTask(async () => {
+    const ackIds = [];
+    for (const env of data.envelopes || []) {
+      if (processedEnvelopeIds.has(env.id)) {
+        ackIds.push(env.id);
+        continue;
+      }
+      try {
+        const bytes = fromBase64Url(env.blobB64);
+        await processIncomingEnvelope(env.id, bytes, { skipImmediateAck: true });
+        ackIds.push(env.id);
+      } catch (err) {
+        console.warn('[mailbox] ошибка обработки конверта:', err.message);
+        ackIds.push(env.id);
+      }
     }
-  }
-  const askAckIds = [];
-  for (const ask of data.asks || []) {
-    await processIncomingAsk(ask, { skipImmediateAck: true });
-    askAckIds.push(ask.id);
-  }
-  if (ackIds.length || askAckIds.length) {
-    await rpcChannel.request('mailbox.ack', { ids: ackIds, askIds: askAckIds }).catch(() => {});
-  }
+
+    const askAckIds = [];
+    for (const ask of data.asks || []) {
+      await processIncomingAsk(ask, { skipImmediateAck: true });
+      askAckIds.push(ask.id);
+    }
+
+    if (ackIds.length || askAckIds.length) {
+      await rpcChannel.request('mailbox.ack', { ids: ackIds, askIds: askAckIds }).catch(() => {});
+    }
+  });
 }
 
 async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = false } = {}) {
@@ -597,29 +743,33 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     { sealedBytes: new Uint8Array(sealedBytes) },
     []
   );
-  if (!skipImmediateAck && rpcChannel) {
+  rememberProcessedEnvelope(envId);
+
+  if (!skipImmediateAck && envId && rpcChannel) {
     rpcChannel.request('mailbox.ack', { ids: [envId] }).catch(() => {});
   }
 
   const peerId = dec.senderId;
   const payload = dec.payload || {};
+  if (payload.kind === 'rtc-signal') return;
+
   const chatId = `dm:${peerId}`;
 
-  // Гарантируем карточку чата
   if (!store.chats[chatId]) {
     let peerInfo = null;
     try {
       peerInfo = (await rpcChannel.request('directory.bundle', { query: peerId })).data;
-    } catch { /* собеседник может скрывать профиль */ }
+    } catch { /* профиль может быть недоступен */ }
 
+    const uname = peerInfo?.username || dec.senderIdentity?.username || peerId.slice(0, 12);
     store.chats[chatId] = {
       id: chatId,
       kind: 'dm',
       peerId,
-      username: peerInfo?.username || peerId.slice(0, 12),
+      username: uname,
       title: peerInfo?.username ? `@${peerInfo.username}` : `Контакт ${peerId.slice(2, 8)}`,
-      mailboxId: peerInfo?.mailboxId || payload.replyMailbox?.mailboxId || '',
-      mailboxWriteToken: peerInfo?.mailboxWriteToken || payload.replyMailbox?.mailboxWriteToken || '',
+      mailboxId: payload.replyMailbox?.mailboxId || peerInfo?.mailboxId || '',
+      mailboxWriteToken: payload.replyMailbox?.mailboxWriteToken || peerInfo?.mailboxWriteToken || '',
       avatarColor: pickColor(peerId),
       verified: false,
       muted: false,
@@ -633,7 +783,6 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     store.chats[chatId].mailboxWriteToken = payload.replyMailbox.mailboxWriteToken;
   }
 
-  // Обработка E2E-реакций на существующее сообщение
   if (payload.type === 'reaction' && payload.targetMsgId) {
     applyReactionLocal(chatId, payload.targetMsgId, peerId, payload.emoji);
     await persistChatsAndMessages();
@@ -641,7 +790,6 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     return;
   }
 
-  // Обработка синхронизации настройки TTL в чате
   if (payload.type === 'ttl-update') {
     store.chats[chatId].ttlSec = Number(payload.ttlSec) || 0;
     await persistChatsAndMessages();
@@ -651,7 +799,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
 
   const msgId = payload.msgId || `m_${toBase64Url(randomBytes(8))}`;
   const list = store.messages[chatId] || (store.messages[chatId] = []);
-  if (list.some((m) => m.id === msgId)) return; // Идемпотентная дедупликация
+  if (list.some((m) => m.id === msgId)) return;
 
   const ttlSec = Number(payload.ttlSec || store.chats[chatId].ttlSec || 0);
   const now = Date.now();
@@ -674,7 +822,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   const chat = store.chats[chatId];
   chat.lastTs = msg.ts;
   chat.lastPreview = msg.media
-    ? (msg.media.once ? '🔥 Одноразовое медиа' : `📎 ${msg.media.name}`)
+    ? (msg.media.once ? '[1×] Вложение' : `[Файл] ${msg.media.name}`)
     : msg.text.slice(0, 90);
 
   if (store.ui.activeChatId !== chatId) {
@@ -700,9 +848,9 @@ async function processIncomingAsk(askItem, { skipImmediateAck = false } = {}) {
         id: chatId,
         kind: 'ask',
         peerId: 'anon',
-        username: 'pravda',
-        title: 'Голая правда (Анонимные вопросы)',
-        avatarColor: '#EC6482',
+        username: 'gateway',
+        title: 'Входящий шлюз E2E',
+        avatarColor: '#1E3A5F',
         verified: true,
         muted: false,
         ttlSec: 0,
@@ -726,14 +874,14 @@ async function processIncomingAsk(askItem, { skipImmediateAck = false } = {}) {
       reactions: {},
     });
     const chat = store.chats[chatId];
-    chat.lastPreview = `🎭 ${text.slice(0, 75)}`;
+    chat.lastPreview = text.slice(0, 80);
     chat.lastTs = Date.now();
     if (store.ui.activeChatId !== chatId) chat.unread = (chat.unread || 0) + 1;
     if (store.settings.sound && !store.ui.bossActive) playSfx('incoming');
     await persistChatsAndMessages();
     notifyStore();
   } catch (err) {
-    console.warn('[ask] не удалось расшифровать вопрос:', err.message);
+    console.warn('[ask] не удалось расшифровать обращение:', err.message);
   }
 }
 
@@ -785,20 +933,19 @@ export async function registerAccount({ username, password, inviteCode = '' }) {
     };
     store.recoveryModalKey = provisioned.recoveryKit?.recoveryKey || null;
 
-    // Создаём локальную заметку «Избранное / Сейф» и инбокс «Голой правды»
     store.chats = {
       'ask:inbox': {
         id: 'ask:inbox',
         kind: 'ask',
         peerId: 'anon',
         username: reg.username,
-        title: 'Голая правда · Вопросы',
-        avatarColor: '#EC6482',
+        title: 'Входящий шлюз E2E',
+        avatarColor: '#1E3A5F',
         verified: true,
         muted: false,
         ttlSec: 0,
         unread: 0,
-        lastPreview: `Ваша анонимная ссылка: /q/${reg.username}`,
+        lastPreview: `Адрес приёма: /q/${reg.username}`,
         lastTs: Date.now(),
       },
     };
@@ -809,7 +956,7 @@ export async function registerAccount({ username, password, inviteCode = '' }) {
           chatId: 'ask:inbox',
           out: false,
           type: 'highlight',
-          text: `Любой человек без регистрации может задать вам E2E-зашифрованный вопрос по ссылке ${location.origin}/q/${reg.username}. Сервер не видит ни текст вопроса, ни IP автора.`,
+          text: `Внешний приёмник зашифрованных обращений активен по адресу ${location.origin}/q/${reg.username}. Отправитель шифрует текст вашим публичным ключом ECDH P-256 без регистрации; сервер не хранит IP-адрес и метаданные.`,
           ts: Date.now(),
           ttlSec: 0,
           expiresAt: 0,
@@ -849,16 +996,17 @@ export async function loginAccount({ username, password, recoveryKey = '' }) {
       signatureB64: sig,
     });
 
-    // Проверяем, есть ли ключи личности на этом устройстве; если новое устройство — восстанавливаем из Recovery Kit
+    let recoveredBundle = null;
     const workerState = await cryptoWorker.call('init');
     if (!workerState.hasIdentity || workerState.publicIdentity?.userId !== res.userId) {
       if (!res.encryptedRecovery || !recoveryKey.trim()) {
-        throw new Error('Вход с нового устройства: введите ваш 52-символьный Ключ восстановления (Recovery Key)');
+        throw new Error('Вход с нового устройства: введите 52-символьный Ключ восстановления (Recovery Key)');
       }
-      await cryptoWorker.call('importRecoveryKit', {
+      const imported = await cryptoWorker.call('importRecoveryKit', {
         encryptedBackup: res.encryptedRecovery,
         recoveryKey: recoveryKey.trim(),
       });
+      recoveredBundle = imported.publicBundle || null;
     }
 
     store.me = {
@@ -868,11 +1016,12 @@ export async function loginAccount({ username, password, recoveryKey = '' }) {
       mailboxId: res.mailboxId,
       mailboxWriteToken: res.mailboxWriteToken,
     };
-    store.chats = (await clientDb.get('chats', {})) || {};
+    store.chats = normalizeStoredChats((await clientDb.get('chats', {})) || {});
     store.messages = (await clientDb.get('messages', {})) || {};
+    store.outbox = (await clientDb.get('outbox', [])) || [];
 
     await clientDb.set('me', store.me);
-    await connectActiveTransport();
+    await connectActiveTransport(recoveredBundle);
   } catch (err) {
     store.authError = err.message;
   } finally {
@@ -882,25 +1031,37 @@ export async function loginAccount({ username, password, recoveryKey = '' }) {
 }
 
 export async function logoutAndWipeDevice() {
+  clearInterval(syncLoopTimer);
   if (activeTransport) await activeTransport.close('logout').catch(() => {});
   await clientDb.clearAll();
   cryptoWorker.terminate();
   location.reload();
 }
 
-// ─────────────────────── Чаты, Отправка и Файлы E2E ───────────────────────
+// ─────────────────────── Чаты, Гарантированная Доставка и Файлы E2E ───────────────────────
 
+/**
+ * Добавляет контакт в список диалогов и фиксирует его ключ безопасности (TOFU),
+ * НЕ расходуя OPK и НЕ создавая полуоткрытую сессию до фактической отправки первого сообщения.
+ * Это исключает коллизию, когда оба собеседника добавляют друг друга одновременно.
+ */
 export async function startChatWithUsername(query) {
   const clean = String(query || '').trim().replace(/^@/, '').toLowerCase();
   if (!clean) return;
   if (clean === store.me?.username) {
-    showToast('Нельзя открыть внешний чат с самим собой', 'err');
+    showToast('Нельзя открыть внешний диалог с собственным идентификатором', 'err');
     return;
   }
+
+  if (!activeTransport?.isConnected || !store.sessionAuthenticated) {
+    await syncNow();
+  }
+
   const { data: bundle } = await rpcChannel.request('directory.bundle', { query: clean });
-  await cryptoWorker.call('establishOutgoingSession', { peerBundle: bundle });
+  await cryptoWorker.call('savePeerIdentity', { peerIdentity: bundle.identity });
 
   const chatId = `dm:${bundle.userId}`;
+  const existing = store.chats[chatId];
   store.chats[chatId] = {
     id: chatId,
     kind: 'dm',
@@ -909,18 +1070,40 @@ export async function startChatWithUsername(query) {
     title: `@${bundle.username}`,
     mailboxId: bundle.mailboxId,
     mailboxWriteToken: bundle.mailboxWriteToken,
-    avatarColor: pickColor(bundle.userId),
-    verified: false,
-    muted: false,
-    ttlSec: 0,
-    unread: 0,
-    lastPreview: 'Сессия X3DH установлена · E2E по умолчанию',
+    avatarColor: existing?.avatarColor || pickColor(bundle.userId),
+    verified: Boolean(existing?.verified),
+    muted: Boolean(existing?.muted),
+    ttlSec: existing?.ttlSec || 0,
+    unread: existing?.unread || 0,
+    lastPreview: existing?.lastPreview || 'Канал E2E готов · Double Ratchet',
     lastTs: Date.now(),
+    cachedBundle: bundle,
   };
   if (!store.messages[chatId]) store.messages[chatId] = [];
   selectChat(chatId);
   await persistChatsAndMessages();
-  showToast(`Защищённая сессия X3DH с @${bundle.username} создана`);
+  showToast(`Контакт @${bundle.username} проверен и добавлен`);
+}
+
+/** Ленивая инициализация исходящей X3DH-сессии непосредственно перед отправкой первого пакета */
+async function ensureOutgoingSessionForChat(chat) {
+  const status = await cryptoWorker.call('hasPeerSession', { peerId: chat.peerId });
+  if (status.ready) return;
+
+  let bundle = chat.cachedBundle || null;
+  if (!bundle && rpcChannel && activeTransport?.isConnected) {
+    const res = await rpcChannel.request('directory.bundle', {
+      query: chat.username || chat.peerId,
+    });
+    bundle = res.data;
+    chat.mailboxId = bundle.mailboxId;
+    chat.mailboxWriteToken = bundle.mailboxWriteToken;
+  }
+  if (!bundle) {
+    throw new Error('Узел недоступен для получения PreKeyBundle собеседника');
+  }
+  chat.cachedBundle = null;
+  await cryptoWorker.call('establishOutgoingSession', { peerBundle: bundle });
 }
 
 export function selectChat(chatId) {
@@ -966,7 +1149,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
   list.push(localMsg);
   chat.lastTs = now;
   chat.lastPreview = localMsg.media
-    ? (localMsg.media.once ? '🔥 Одноразовое медиа' : `📎 ${localMsg.media.name}`)
+    ? (localMsg.media.once ? '[1×] Вложение' : `[Файл] ${localMsg.media.name}`)
     : trimmed.slice(0, 90);
   notifyStore();
 
@@ -977,7 +1160,6 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     replyTo: replyObj,
     media: extra.media || null,
     ttlSec,
-    // Передаём свой актуальный адрес ящика внутри шифртекста для обратных ответов собеседника
     replyMailbox: {
       mailboxId: store.me.mailboxId,
       mailboxWriteToken: store.me.mailboxWriteToken,
@@ -988,43 +1170,87 @@ export async function sendChatMessage(chatId, text, extra = {}) {
   await persistChatsAndMessages();
 }
 
-async function deliverPayloadToPeer(chat, wirePayload, localMsg = null) {
-  try {
-    const { sealedBytes } = await cryptoWorker.call('encryptMessageForPeer', {
-      peerId: chat.peerId,
-      payloadObject: wirePayload,
-    });
+/**
+ * Доставляет полезную нагрузку собеседнику через слепой ретранслятор:
+ * 1) Гарантирует сессию X3DH и шифрует пакет ОДИН раз (сохраняя целостность цепочки Double Ratchet).
+ * 2) Если ящик собеседника был ротирован (403/404) — автоматически обновляет адрес ящика и повторяет доставку.
+ * 3) Если сеть недоступна — сохраняет уже зашифрованный конверт в Outbox для мгновенной досылки при связи.
+ */
+async function sendSealedEnvelopeWithRefresh(chat, sealedBytes, ttlSec) {
+  if (!rpcChannel || !activeTransport?.isConnected) {
+    throw new Error('offline');
+  }
+  if (!store.sessionAuthenticated && store.me?.token) {
+    await authenticateAndSyncTransport();
+  }
+
+  const effectiveTtl = ttlSec > 0 ? Math.max(300, ttlSec * 2) : 14 * 86400;
+
+  const attemptDrop = async () => {
     const writeProof = await computeMailboxWriteProof(chat.mailboxWriteToken, sealedBytes);
-
-    if (!rpcChannel || !activeTransport?.isConnected) {
-      throw new Error('offline');
-    }
-
     await rpcChannel.request(
       'relay.drop',
       {
         mailboxId: chat.mailboxId,
         writeProof,
-        ttlSec: wirePayload.ttlSec > 0 ? Math.max(300, wirePayload.ttlSec * 2) : 14 * 86400,
+        ttlSec: effectiveTtl,
       },
       { body: sealedBytes }
     );
+  };
+
+  try {
+    await attemptDrop();
+  } catch (err) {
+    const msg = String(err?.message || '');
+    const mailboxStale =
+      msg.includes('Почтовый ящик') ||
+      msg.includes('недействительный токен') ||
+      msg.includes('Недействительный токен') ||
+      msg.includes('404') ||
+      msg.includes('403');
+
+    if (mailboxStale && chat.username) {
+      const { data: fresh } = await rpcChannel.request('directory.bundle', { query: chat.username });
+      chat.mailboxId = fresh.mailboxId;
+      chat.mailboxWriteToken = fresh.mailboxWriteToken;
+      await persistChatsAndMessages();
+      await attemptDrop();
+      return;
+    }
+    throw err;
+  }
+}
+
+async function deliverPayloadToPeer(chat, wirePayload, localMsg = null) {
+  let sealedB64 = null;
+  try {
+    await ensureOutgoingSessionForChat(chat);
+    const { sealedBytes } = await cryptoWorker.call('encryptMessageForPeer', {
+      peerId: chat.peerId,
+      payloadObject: wirePayload,
+    });
+    sealedB64 = toBase64Url(sealedBytes);
+
+    await sendSealedEnvelopeWithRefresh(chat, sealedBytes, wirePayload.ttlSec || 0);
 
     if (localMsg) {
       localMsg.status = 'sent';
       if (store.settings.sound) playSfx('sent');
     }
-  } catch (err) {
-    // Offline-First: ставим уже зашифрованный конверт в локальную очередь Outbox для досылки при появлении сети
+  } catch {
     if (localMsg) localMsg.status = 'queued';
     store.outbox.push({
       id: toBase64Url(randomBytes(8)),
       chatId: chat.id,
       msgId: localMsg?.id || null,
       peerId: chat.peerId,
+      username: chat.username || '',
       mailboxId: chat.mailboxId,
       mailboxWriteToken: chat.mailboxWriteToken,
-      wirePayload,
+      sealedB64,
+      wirePayload: sealedB64 ? null : wirePayload,
+      ttlSec: wirePayload.ttlSec || 0,
     });
     await clientDb.set('outbox', store.outbox);
   }
@@ -1032,34 +1258,56 @@ async function deliverPayloadToPeer(chat, wirePayload, localMsg = null) {
 }
 
 async function flushOutbox() {
-  if (!store.outbox.length || !rpcChannel || !activeTransport?.isConnected) return;
-  const queue = [...store.outbox];
-  store.outbox = [];
-  for (const item of queue) {
-    try {
-      const { sealedBytes } = await cryptoWorker.call('encryptMessageForPeer', {
-        peerId: item.peerId,
-        payloadObject: item.wirePayload,
-      });
-      const writeProof = await computeMailboxWriteProof(item.mailboxWriteToken, sealedBytes);
-      await rpcChannel.request(
-        'relay.drop',
-        { mailboxId: item.mailboxId, writeProof },
-        { body: sealedBytes }
-      );
-      const list = store.messages[item.chatId] || [];
-      const msg = list.find((x) => x.id === item.msgId);
-      if (msg) msg.status = 'sent';
-    } catch {
-      store.outbox.push(item);
+  if (flushInFlight || !store.outbox.length || !rpcChannel || !activeTransport?.isConnected) return;
+  flushInFlight = true;
+  try {
+    const queue = [...store.outbox];
+    const remaining = [];
+
+    for (const item of queue) {
+      try {
+        const chat = store.chats[item.chatId] || {
+          id: item.chatId,
+          peerId: item.peerId,
+          username: item.username,
+          mailboxId: item.mailboxId,
+          mailboxWriteToken: item.mailboxWriteToken,
+        };
+
+        let sealedBytes;
+        if (item.sealedB64) {
+          sealedBytes = fromBase64Url(item.sealedB64);
+        } else {
+          await ensureOutgoingSessionForChat(chat);
+          const enc = await cryptoWorker.call('encryptMessageForPeer', {
+            peerId: item.peerId,
+            payloadObject: item.wirePayload,
+          });
+          sealedBytes = enc.sealedBytes;
+          item.sealedB64 = toBase64Url(sealedBytes);
+          item.wirePayload = null;
+        }
+
+        await sendSealedEnvelopeWithRefresh(chat, sealedBytes, item.ttlSec || 0);
+
+        const list = store.messages[item.chatId] || [];
+        const msg = list.find((x) => x.id === item.msgId);
+        if (msg) msg.status = 'sent';
+      } catch {
+        remaining.push(item);
+      }
     }
+
+    store.outbox = remaining;
+    await clientDb.set('outbox', store.outbox);
+    await persistChatsAndMessages();
+    notifyStore();
+  } finally {
+    flushInFlight = false;
   }
-  await clientDb.set('outbox', store.outbox);
-  await persistChatsAndMessages();
-  notifyStore();
 }
 
-/** Шифрует файл в CryptoWorker (AES-256-GCM) до загрузки и отправляет ключи строго внутри Double Ratchet */
+/** Шифрует файл в CryptoWorker (AES-256-GCM) до загрузки и передаёт ключи строго внутри Double Ratchet */
 export async function sendEncryptedAttachment(chatId, file, { once = false, caption = '' } = {}) {
   const chat = store.chats[chatId];
   if (!chat) return;
@@ -1121,9 +1369,9 @@ export async function openEncryptedMedia(msg) {
       msg.media.burned = true;
       await persistChatsAndMessages();
       notifyStore();
-      throw new Error('Одноразовый файл уже был просмотрен и физически уничтожен на сервере');
+      throw new Error('Вложение однократного просмотра уже было открыто и физически удалено с узла');
     }
-    if (!res.ok) throw new Error(`Ошибка загрузки блоба (${res.status})`);
+    if (!res.ok) throw new Error(`Ошибка загрузки вложения (${res.status})`);
 
     const encBytes = new Uint8Array(await res.arrayBuffer());
     const plainBytes = await cryptoWorker.call(
@@ -1204,14 +1452,14 @@ export async function markPeerVerified(chatId, verified = true) {
   chat.verified = verified;
   await persistChatsAndMessages();
   store.ui.modal = null;
-  showToast(verified ? 'Ключи собеседника помечены как проверенные ✓' : 'Отметка проверки снята');
+  showToast(verified ? 'Отпечаток безопасности собеседника подтверждён' : 'Отметка верификации снята');
   notifyStore();
 }
 
 export async function blockAnonQuestionAuthor(senderBlockTag) {
   if (!rpcChannel || !senderBlockTag) return;
   await rpcChannel.request('ask.block', { senderBlockTag });
-  showToast('Анонимный отправитель заблокирован по HMAC-отпечатку (его IP остаётся неизвестным)');
+  showToast('Отправитель заблокирован по слепому HMAC-идентификатору');
 }
 
 export async function rotateBlindMailbox() {
@@ -1220,7 +1468,7 @@ export async function rotateBlindMailbox() {
   store.me.mailboxId = data.mailboxId;
   store.me.mailboxWriteToken = data.mailboxWriteToken;
   await clientDb.set('me', store.me);
-  showToast('Слепой почтовый ящик перевыпущен. Старые токены доставки отозваны.');
+  showToast('Адрес слепого почтового ящика перевыпущен. Прежние токены отозваны.');
   notifyStore();
 }
 
@@ -1248,12 +1496,12 @@ export async function updateClientSettings(patch) {
   }
 }
 
-/** Мгновенный режим «Прикрыться» (Esc Esc или кнопка 🕶 в шапке) */
+/** Экстренная блокировка экрана (двойной Esc или кнопка в заголовке) */
 export function toggleBossMode(forceValue) {
   const next = typeof forceValue === 'boolean' ? forceValue : !store.ui.bossActive;
   store.ui.bossActive = next;
   if (typeof document !== 'undefined') {
-    document.title = next ? store.settings.bossDocTitle : 'MeshChat — Анонимный E2E-мессенджер';
+    document.title = next ? store.settings.bossDocTitle : 'MeshChat — Защищённый мессенджер';
   }
   if (next && store.settings.strictBossWipe) {
     cryptoWorker.call('lockRamCache').catch(() => {});

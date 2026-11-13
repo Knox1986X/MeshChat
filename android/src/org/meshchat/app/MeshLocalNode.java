@@ -356,8 +356,8 @@ public final class MeshLocalNode {
             JSONObject res = new JSONObject();
             res.put("ok", true);
             res.put("app", "MeshChat");
-            res.put("version", "1.1.0");
-            res.put("versionCode", 2);
+            res.put("version", "1.2.0");
+            res.put("versionCode", 3);
             res.put("apkAvailable", false);
             res.put("githubRepo", "Knox1986X/MeshChat");
             sendJson(out, 200, res);
@@ -692,19 +692,24 @@ public final class MeshLocalNode {
                     ? new JSONObject(new String(frame, 8, metaLen, StandardCharsets.UTF_8))
                     : new JSONObject();
             byte[] body = Arrays.copyOfRange(frame, 8 + metaLen, frame.length);
-            String action = meta.optString("action", "");
-            JSONObject params = meta.optJSONObject("params") != null ? meta.getJSONObject("params") : new JSONObject();
+            String action = meta.optString("m", meta.optString("action", ""));
+            JSONObject params = meta.optJSONObject("p") != null
+                    ? meta.getJSONObject("p")
+                    : (meta.optJSONObject("params") != null ? meta.getJSONObject("params") : new JSONObject());
 
             JSONObject result = dispatchRpc(peer, action, params, body);
             JSONObject resMeta = new JSONObject();
             resMeta.put("ok", true);
+            resMeta.put("r", result);
             resMeta.put("data", result);
             peer.sendProtocolFrame(0x02, reqId, resMeta, null);
         } catch (Exception err) {
             try {
+                String msg = err.getMessage() != null ? err.getMessage() : "Ошибка RPC";
                 JSONObject resMeta = new JSONObject();
                 resMeta.put("ok", false);
-                resMeta.put("error", err.getMessage() != null ? err.getMessage() : "Ошибка RPC");
+                resMeta.put("e", msg);
+                resMeta.put("error", msg);
                 peer.sendProtocolFrame(0x02, reqId, resMeta, null);
             } catch (Exception ignored) {}
         }
@@ -729,10 +734,14 @@ public final class MeshLocalNode {
                 res.put("remainingOpks", user.getJSONArray("oneTimePreKeys").length());
                 return res;
             }
+            case "directory.bundle":
             case "keys.fetchBundle": {
                 requireAuth(peer);
-                String uname = p.optString("username", "").trim().replaceFirst("^@", "").toLowerCase(Locale.ROOT);
-                String targetUid = !uname.isEmpty() ? userIdByName.get(uname) : p.optString("userId", null);
+                String rawQuery = p.optString("query", p.optString("username", "")).trim();
+                String uname = rawQuery.replaceFirst("^@", "").toLowerCase(Locale.ROOT);
+                String targetUid = usersById.containsKey(rawQuery)
+                        ? rawQuery
+                        : (!uname.isEmpty() ? userIdByName.get(uname) : p.optString("userId", null));
                 if (targetUid == null || !usersById.containsKey(targetUid)) {
                     throw new IllegalArgumentException("Собеседник @" + uname + " не найден на этом узле");
                 }
@@ -756,6 +765,20 @@ public final class MeshLocalNode {
                 res.put("identity", target.getJSONObject("identity"));
                 res.put("signedPreKey", target.getJSONObject("signedPreKey"));
                 res.put("oneTimePreKey", opk);
+                return res;
+            }
+            case "keys.rotateSpk": {
+                requireAuth(peer);
+                JSONObject user = usersById.get(peer.userId);
+                JSONObject spk = p.optJSONObject("signedPreKey");
+                if (spk != null) {
+                    synchronized (user) {
+                        user.put("signedPreKey", spk);
+                        persistUsers();
+                    }
+                }
+                JSONObject res = new JSONObject();
+                res.put("ok", true);
                 return res;
             }
             case "keys.replenishOpk": {
@@ -906,6 +929,8 @@ public final class MeshLocalNode {
         if (peers == null || peers.isEmpty()) return 0;
         JSONObject ev = new JSONObject();
         try {
+            ev.put("ev", eventName);
+            ev.put("d", data);
             ev.put("event", eventName);
             ev.put("data", data);
         } catch (Exception ignored) {}

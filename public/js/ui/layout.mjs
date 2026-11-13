@@ -1,4 +1,4 @@
-// Корневой макет клиента: экран Zero-Knowledge входа/регистрации + 3-колоночное рабочее окно.
+// Корневой макет клиента: экран Zero-Knowledge аутентификации и 3-панельный рабочий терминал.
 
 import { html, useState } from '../../vendor/preact.mjs';
 import {
@@ -23,16 +23,16 @@ export function UpdateBanner({ update }) {
   if (!update?.available || update.dismissed) return null;
   return html`<div class="update-banner">
     <div class="update-banner-row">
-      <div class="update-badge-icon"><${Icon} name="download" size=${16} /></div>
+      <div class="update-badge-icon"><${Icon} name="download" size=${15} /></div>
       <div class="update-banner-copy">
-        <b>Доступен MeshChat v${update.remoteVersion || APP_VERSION}</b>
-        <span>${update.downloading ? (update.statusText || `Загрузка ${update.progress}%…`) : 'Криптопроверка SHA-256 · обновление в 1 клик'}</span>
+        <b>Доступно обновление MeshChat v${update.remoteVersion || APP_VERSION}</b>
+        <span>${update.downloading ? (update.statusText || `Загрузка ${update.progress}%`) : 'Верификация пакета по SHA-256'}</span>
       </div>
       ${!update.downloading && html`<button type="button" class="btn-update-now" onClick=${applyAppUpdate}>
-        Обновить
+        Установить
       </button>`}
-      ${!update.downloading && html`<button type="button" class="icon-btn small" title="Отложить" onClick=${dismissUpdateBanner}>
-        <${Icon} name="close" size=${14} />
+      ${!update.downloading && html`<button type="button" class="icon-btn small" title="Скрыть" onClick=${dismissUpdateBanner}>
+        <${Icon} name="close" size=${13} />
       </button>`}
     </div>
     ${update.downloading && html`<div class="update-progress-track">
@@ -43,7 +43,7 @@ export function UpdateBanner({ update }) {
 
 function AuthScreen() {
   const { busy, authError, settings, android, update } = useAppStore();
-  const [mode, setMode] = useState('register'); // 'register' | 'login'
+  const [mode, setMode] = useState('register');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [recoveryKey, setRecoveryKey] = useState('');
@@ -70,13 +70,13 @@ function AuthScreen() {
       <${UpdateBanner} update=${update} />
 
       <div class="auth-brand">
-        <div class="auth-logo"><${Icon} name="mesh" size=${28} /></div>
+        <div class="auth-logo"><${Icon} name="mesh" size=${26} /></div>
         <div class="auth-brand-text">
           <div class="auth-title-row">
             <h1>MeshChat</h1>
             <span class="version-chip">v${APP_VERSION}</span>
           </div>
-          <span>Без телефона · Без email · Signal Protocol · P2P Mesh & Tor</span>
+          <span>X3DH · Double Ratchet · Sealed Sender · P2P / Tor / I2P</span>
         </div>
       </div>
 
@@ -85,34 +85,34 @@ function AuthScreen() {
           type="button"
           class=${mode === 'register' ? 'active' : ''}
           onClick=${() => setMode('register')}
-        >Анонимная регистрация</button>
+        >Регистрация ключа</button>
         <button
           type="button"
           class=${mode === 'login' ? 'active' : ''}
           onClick=${() => setMode('login')}
-        >Zero-Knowledge Вход</button>
+        >Вход (Zero-Knowledge)</button>
       </div>
 
       <form onSubmit=${onSubmit} class="auth-form">
-        <label class="field-label">Псевдоним (@username)</label>
+        <label class="field-label">Идентификатор (@username)</label>
         <input
           class="field-input"
           type="text"
           required
           minLength="3"
           maxLength="32"
-          placeholder="например, cipher_fox"
+          placeholder="operator_01"
           value=${username}
           onInput=${(e) => setUsername(e.target.value)}
         />
 
-        <label class="field-label">Пароль (обрабатывается локально через Argon2id 64 МБ)</label>
+        <label class="field-label">Пароль (локальный вывод ключа Argon2id 64 МиБ)</label>
         <input
           class="field-input"
           type="password"
           required
           minLength="8"
-          placeholder="Минимум 8 символов — на сервер не передаётся"
+          placeholder="Минимум 8 символов (не покидает устройство)"
           value=${password}
           onInput=${(e) => setPassword(e.target.value)}
         />
@@ -135,21 +135,21 @@ function AuthScreen() {
             type="button"
             class="link-btn"
             onClick=${() => setShowNodeBox(!showNodeBox)}
-          >${showNodeBox ? '▾ Скрыть настройки узла MeshChat' : '▸ Выбрать сервер / Wi-Fi Mesh / .onion узел'}</button>
-          ${showNodeBox && html`<div style="margin-top:8px;padding:11px;border-radius:12px;background:rgba(255,255,255,0.035);border:1px solid rgba(255,255,255,0.08)">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          >${showNodeBox ? '▾ Скрыть параметры узла ретрансляции' : '▸ Узел ретрансляции (Облако / LAN / .onion)'}</button>
+          ${showNodeBox && html`<div class="node-config-box">
+            <div class="node-preset-row">
               <button
                 type="button"
                 class="btn-ghost compact"
                 onClick=${() => { setServerUrl(DEFAULT_CLOUD_URL); updateClientSettings({ serverUrl: DEFAULT_CLOUD_URL }); }}
-              >🌐 Облако EU</button>
+              ><${Icon} name="globe" size=${13} /> Узел EU</button>
               <button
                 type="button"
                 class="btn-ghost compact"
                 onClick=${() => { setServerUrl(''); updateClientSettings({ serverUrl: '' }); }}
-              >📱 Локальный узел</button>
+              ><${Icon} name="server" size=${13} /> Локальный узел</button>
             </div>
-            <label class="field-label">Адрес сервера MeshChat (пусто = локальный узел)</label>
+            <label class="field-label">URL сервера ретрансляции (пусто = текущий узел)</label>
             <input
               class="field-input"
               type="text"
@@ -160,7 +160,7 @@ function AuthScreen() {
             />
             ${android?.isApk && html`<div class="insp-row" style="margin-top:8px;padding:4px 0" onClick=${toggleAndroidLanMesh}>
               <span class="insp-label" style="font-size:12px">
-                📡 Раздавать Wi-Fi Mesh узел на телефоне ${android.lanMeshRunning && android.lanUrl ? `(${android.lanUrl})` : '(:3000)'}
+                Локальный ретранслятор Wi-Fi LAN ${android.lanMeshRunning && android.lanUrl ? `(${android.lanUrl})` : '(:3000)'}
               </span>
               <span class=${`ios-switch ${android.lanMeshRunning ? 'on' : ''}`}><i></i></span>
             </div>`}
@@ -169,23 +169,23 @@ function AuthScreen() {
 
         <button type="submit" class="btn-primary full" disabled=${busy}>
           ${busy
-            ? 'Генерация ключей P-256 + Argon2id + Proof-of-Work…'
+            ? 'Вычисление P-256 + Argon2id + Proof-of-Work…'
             : mode === 'register'
-              ? 'Создать локальные ключи и войти'
-              : 'Подписать challenge и войти'}
+              ? 'Сгенерировать ключи и открыть сеанс'
+              : 'Подтвердить подпись ECDSA и войти'}
         </button>
 
         ${mode === 'login' && !needRecoveryField && html`<button
           type="button"
           class="text-link-btn"
           onClick=${() => setNeedRecoveryField(true)}
-        >Входите с нового браузера/устройства? Ввести ключ восстановления</button>`}
+        >Новое устройство? Ввести 256-битный ключ восстановления</button>`}
       </form>
 
       <ul class="auth-guarantees">
-        <li><b>Zero-Knowledge Auth:</b> пароль никогда не покидает ваш браузер.</li>
-        <li><b>extractable = false:</b> ключи хранятся в IndexedDB внутри изолированного Web Worker.</li>
-        <li><b>Sealed Sender:</b> сервер не хранит граф контактов и IP-адреса.</li>
+        <li><b>Zero-Knowledge:</b> пароль обрабатывается строго локально и не передаётся на сервер.</li>
+        <li><b>extractable = false:</b> закрытые ключи изолированы внутри криптографического Web Worker.</li>
+        <li><b>Слепая ретрансляция:</b> узел не располагает графом контактов и IP-адресами.</li>
       </ul>
     </div>
   </div>`;
@@ -197,7 +197,7 @@ export function AppRoot() {
   if (s.booting) {
     return html`<div class="boot-loader">
       <div class="spinner"></div>
-      <span>Открытие изолированного криптомодуля…</span>
+      <span>Инициализация криптографического модуля…</span>
     </div>`;
   }
 

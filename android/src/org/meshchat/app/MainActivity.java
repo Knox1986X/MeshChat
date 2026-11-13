@@ -43,13 +43,13 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Окрашиваем системные панели в цвет оболочки (#222032) и блокируем перехват экрана в Recents
+        // Окрашиваем системные панели в строгий графитовый цвет (#090b0f) и блокируем перехват в Recents
         Window window = getWindow();
         if (window != null) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.parseColor("#222032"));
-            window.setNavigationBarColor(Color.parseColor("#181628"));
+            window.setStatusBarColor(Color.parseColor("#090b0f"));
+            window.setNavigationBarColor(Color.parseColor("#0c0f15"));
         }
 
         socksBridge = new MeshSocksBridge();
@@ -60,10 +60,10 @@ public final class MainActivity extends Activity {
         updater = new MeshUpdater(this);
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#222032"));
+        root.setBackgroundColor(Color.parseColor("#090b0f"));
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.parseColor("#222032"));
+        webView.setBackgroundColor(Color.parseColor("#090b0f"));
         configureWebView(webView);
 
         root.addView(webView, new FrameLayout.LayoutParams(
@@ -172,6 +172,15 @@ public final class MainActivity extends Activity {
                 pendingWebRtcPermission.deny();
             }
             pendingWebRtcPermission = null;
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (webView != null) {
+            webView.onResume();
+            webView.evaluateJavascript("window.dispatchEvent(new Event('meshchat:resume'));", null);
         }
     }
 

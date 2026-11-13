@@ -99,11 +99,20 @@ export async function computeSafetyNumber(identityA, identityB) {
     emojis.push(SAFETY_EMOJIS[combinedHash[i] & 63]);
   }
 
+  // Строгий 128-битный шестнадцатеричный отпечаток (8 групп по 4 HEX-символа) для верификации ключей
+  const hexBlocks = [];
+  for (let i = 0; i < 16; i += 2) {
+    const word = ((combinedHash[i] << 8) | combinedHash[i + 1]).toString(16).toUpperCase().padStart(4, '0');
+    hexBlocks.push(word);
+  }
+
   return {
     digits: blocks.join(' '),
     blocks,
+    hexBlocks,
+    hexText: hexBlocks.join('-'),
     emojis,
     emojiText: emojis.join(' '),
-    qrPayload: `veil-sn:v1:${toBase64Url(combinedHash.subarray(0, 32))}`,
+    qrPayload: `meshchat-sn:v1:${toBase64Url(combinedHash.subarray(0, 32))}`,
   };
 }

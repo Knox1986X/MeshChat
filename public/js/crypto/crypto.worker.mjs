@@ -44,6 +44,14 @@ export class CryptoEngine {
     this.store = store;
     this.sessions = new Map(); // peerId -> DoubleRatchetSession (кеш в RAM воркера)
     this.identity = null;      // { userId, publicIdentity, privateKeys: { ikSignPriv, ikDhPriv } }
+    this._mutex = Promise.resolve(); // Строгая FIFO-очередь для исключения гонок состояний храповика
+  }
+
+  /** Последовательное выполнение асинхронных операций с ключами и сессиями Double Ratchet */
+  _runSerialized(fn) {
+    const next = this._mutex.then(fn, fn);
+    this._mutex = next.catch(() => {});
+    return next;
   }
 
   async init() {
@@ -194,143 +202,238 @@ export class CryptoEngine {
     return opks.map(o => o.publicPreKey);
   }
 
+  /** Проверка наличия готовой к отправке сессии Double Ratchet для указанного собеседника */
+  async hasPeerSession({ peerId }) {
+    return this._runSerialized(async () => {
+      this._requireIdentity();
+      const session = await this._loadSession(peerId).catch(() => null);
+      const meta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
+      return {
+        ready: Boolean(session && session.sendChainKey && meta?.peerIdentity),
+        hasIdentity: Boolean(meta?.peerIdentity),
+      };
+    });
+  }
+
+  /** Сохранение публичного удостоверения собеседника (TOFU) без преждевременного запуска храповика */
+  async savePeerIdentity({ peerIdentity }) {
+    return this._runSerialized(async () => {
+      this._requireIdentity();
+      const peerId = peerIdentity.userId;
+      const existingMeta = (await this.store.getEncryptedRecord(`peerMeta:${peerId}`)) || {};
+      if (
+        existingMeta.peerIdentity &&
+        (existingMeta.peerIdentity.ikSignPub !== peerIdentity.ikSignPub ||
+          existingMeta.peerIdentity.ikDhPub !== peerIdentity.ikDhPub) &&
+        !existingMeta.allowKeyChange
+      ) {
+        throw new Error(`ВНИМАНИЕ: изменился публичный ключ собеседника ${peerId}. Сверьте отпечаток безопасности.`);
+      }
+      await this.store.putEncryptedRecord(`peerMeta:${peerId}`, {
+        ...existingMeta,
+        peerIdentity,
+      });
+      return {
+        peerId,
+        safetyNumber: await computeSafetyNumber(this.identity.publicIdentity, peerIdentity),
+      };
+    });
+  }
+
   /** Установка исходящей сессии X3DH + Double Ratchet по PreKeyBundle собеседника */
-  async establishOutgoingSession({ peerBundle }) {
-    this._requireIdentity();
-    const peerId = peerBundle.identity.userId;
-    const x3dh = await x3dhInitiate({
-      aliceIdentity: this.identity.publicIdentity,
-      alicePrivateKeys: this.identity.privateKeys,
-      bobPreKeyBundle: peerBundle,
+  async establishOutgoingSession({ peerBundle, forceReset = false }) {
+    return this._runSerialized(async () => {
+      this._requireIdentity();
+      const peerId = peerBundle.identity.userId;
+      const existingMeta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
+
+      if (
+        existingMeta?.peerIdentity &&
+        (existingMeta.peerIdentity.ikSignPub !== peerBundle.identity.ikSignPub ||
+          existingMeta.peerIdentity.ikDhPub !== peerBundle.identity.ikDhPub) &&
+        !existingMeta.allowKeyChange
+      ) {
+        throw new Error(`ВНИМАНИЕ: изменился ключ безопасности пользователя ${peerId}. Сверьте отпечаток.`);
+      }
+
+      // Не перезатираем уже работающую сессию Double Ratchet при повторном открытии диалога
+      if (!forceReset) {
+        const existingSession = await this._loadSession(peerId).catch(() => null);
+        if (existingSession && existingSession.sendChainKey) {
+          await this.store.putEncryptedRecord(`peerMeta:${peerId}`, {
+            ...existingMeta,
+            peerIdentity: peerBundle.identity,
+          });
+          return {
+            peerId,
+            reused: true,
+            safetyNumber: await computeSafetyNumber(this.identity.publicIdentity, peerBundle.identity),
+          };
+        }
+      }
+
+      const x3dh = await x3dhInitiate({
+        aliceIdentity: this.identity.publicIdentity,
+        alicePrivateKeys: this.identity.privateKeys,
+        bobPreKeyBundle: peerBundle,
+      });
+      const session = await DoubleRatchetSession.initAsInitiator({
+        sharedSecret: x3dh.sharedSecret,
+        associatedData: x3dh.associatedData,
+        remoteRatchetPubRaw: x3dh.remoteRatchetPubRaw,
+      });
+      this.sessions.set(peerId, session);
+      await this._persistSession(peerId, session, {
+        peerIdentity: peerBundle.identity,
+        pendingHandshake: x3dh.handshake,
+        acceptedEphemeralPub: existingMeta?.acceptedEphemeralPub || null,
+        verified: Boolean(existingMeta?.verified),
+      });
+      return { peerId, safetyNumber: await computeSafetyNumber(this.identity.publicIdentity, peerBundle.identity) };
     });
-    const session = await DoubleRatchetSession.initAsInitiator({
-      sharedSecret: x3dh.sharedSecret,
-      associatedData: x3dh.associatedData,
-      remoteRatchetPubRaw: x3dh.remoteRatchetPubRaw,
-    });
-    this.sessions.set(peerId, session);
-    await this._persistSession(peerId, session, {
-      peerIdentity: peerBundle.identity,
-      pendingHandshake: x3dh.handshake,
-    });
-    return { peerId, safetyNumber: await computeSafetyNumber(this.identity.publicIdentity, peerBundle.identity) };
   }
 
   /** Шифрование сообщения для собеседника и упаковка в анонимный конверт Sealed Sender */
   async encryptMessageForPeer({ peerId, payloadObject }) {
-    this._requireIdentity();
-    const meta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
-    if (!meta || !meta.peerIdentity) {
-      throw new Error(`Нет установленной криптосессии с пользователем ${peerId}`);
-    }
-    const session = await this._loadSession(peerId);
-    const ratchetPacket = await session.encrypt(utf8ToBytes(JSON.stringify(payloadObject)));
+    return this._runSerialized(async () => {
+      this._requireIdentity();
+      const meta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
+      if (!meta || !meta.peerIdentity) {
+        throw new Error(`Нет установленной криптосессии с пользователем ${peerId}`);
+      }
+      const session = await this._loadSession(peerId);
+      const ratchetPacket = await session.encrypt(utf8ToBytes(JSON.stringify(payloadObject)));
 
-    const innerObject = {
-      dr: ratchetPacket,
-      x3dh: meta.pendingHandshake || undefined,
-    };
-    await this._persistSession(peerId, session, meta);
+      const innerObject = {
+        dr: ratchetPacket,
+        x3dh: meta.pendingHandshake || undefined,
+      };
+      await this._persistSession(peerId, session, meta);
 
-    const sealedBytes = await sealSenderEnvelope({
-      recipientIkDhPubB64: meta.peerIdentity.ikDhPub,
-      senderIdentity: this.identity.publicIdentity,
-      innerObject,
+      const sealedBytes = await sealSenderEnvelope({
+        recipientIkDhPubB64: meta.peerIdentity.ikDhPub,
+        senderIdentity: this.identity.publicIdentity,
+        innerObject,
+      });
+      return { sealedBytes };
     });
-    return { sealedBytes };
   }
 
   /** Вскрытие входящего конверта Sealed Sender и расшифровка Double Ratchet (с автопринятием X3DH) */
   async decryptIncomingSealedEnvelope({ sealedBytes }) {
-    this._requireIdentity();
-    const unsealed = await unsealSenderEnvelope({
-      recipientIkDhPriv: this.identity.privateKeys.ikDhPriv,
-      recipientIkDhPubB64: this.identity.publicIdentity.ikDhPub,
-      sealedBytes,
+    return this._runSerialized(async () => {
+      this._requireIdentity();
+      const unsealed = await unsealSenderEnvelope({
+        recipientIkDhPriv: this.identity.privateKeys.ikDhPriv,
+        recipientIkDhPubB64: this.identity.publicIdentity.ikDhPub,
+        sealedBytes,
+      });
+
+      const peerIdentity = unsealed.sender;
+      const peerId = peerIdentity.userId;
+      const existingMeta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
+
+      // Защита от скрытой подмены ключа собеседника (Key Pinning / TOFU + предупреждение о смене)
+      if (
+        existingMeta?.peerIdentity &&
+        (existingMeta.peerIdentity.ikSignPub !== peerIdentity.ikSignPub ||
+          existingMeta.peerIdentity.ikDhPub !== peerIdentity.ikDhPub) &&
+        !existingMeta.allowKeyChange
+      ) {
+        throw new Error(`ВНИМАНИЕ: изменился ключ безопасности пользователя ${peerId}. Сверьте отпечаток.`);
+      }
+
+      let session = await this._loadSession(peerId).catch(() => null);
+      let acceptedEphemeralPub = existingMeta?.acceptedEphemeralPub || null;
+      const hs = unsealed.body.x3dh || null;
+
+      // Определяем, нужно ли инициализировать ответную сессию X3DH:
+      // 1) Если пакет принадлежит уже принятой серии первого полёта (тот же ephemeralPub) — не пересоздаём сессию.
+      // 2) Если пришёл НОВЫЙ ephemeralPub и у нас нет встречного неподтверждённого рукопожатия (или мы уступаем по userId) — принимаем X3DH.
+      const isSameAcceptedFlight = Boolean(hs && session && acceptedEphemeralPub === hs.ephemeralPub);
+      const shouldAcceptHandshake = Boolean(
+        hs &&
+        !isSameAcceptedFlight &&
+        (!session || !existingMeta?.pendingHandshake || peerId < this.identity.userId)
+      );
+
+      if (shouldAcceptHandshake) {
+        const spkPriv = await this.store.getNativeKey(`spk:${hs.spkId}`);
+        const spkMeta = await this.store.getEncryptedRecord(`spkMeta:${hs.spkId}`);
+        if (!spkPriv || !spkMeta) {
+          throw new Error(`Не найден локальный SignedPreKey #${hs.spkId}`);
+        }
+        let opkObj = null;
+        let missingOpk = false;
+        if (hs.opkId !== null && hs.opkId !== undefined) {
+          const opkPriv = await this.store.getNativeKey(`opk:${hs.opkId}`);
+          if (!opkPriv) {
+            missingOpk = true;
+          } else {
+            opkObj = { keyId: hs.opkId, privateKey: opkPriv };
+          }
+        }
+
+        if (missingOpk) {
+          if (!session) {
+            throw new Error(`Одноразовый ключ OPK #${hs.opkId} уже использован или отсутствует`);
+          }
+        } else {
+          const x3dhOut = await x3dhRespond({
+            bobIdentity: this.identity.publicIdentity,
+            bobPrivateKeys: this.identity.privateKeys,
+            bobSignedPreKey: { keyId: hs.spkId, privateKey: spkPriv },
+            bobOneTimePreKey: opkObj,
+            handshake: hs,
+          });
+
+          // Немедленно удаляем использованный одноразовый ключ OPK (Forward Secrecy рукопожатия)
+          if (opkObj) {
+            await this.store.deleteNativeKey(`opk:${opkObj.keyId}`);
+          }
+
+          session = await DoubleRatchetSession.initAsResponder({
+            sharedSecret: x3dhOut.sharedSecret,
+            associatedData: x3dhOut.associatedData,
+            localRatchetPrivateKey: spkPriv,
+            localRatchetPubRaw: fromBase64Url(spkMeta.pubRawB64),
+          });
+          acceptedEphemeralPub = hs.ephemeralPub;
+        }
+      }
+
+      if (!session) {
+        throw new Error(`Сессия Double Ratchet с ${peerId} отсутствует и заголовок X3DH не передан`);
+      }
+
+      const plainBytes = await session.decrypt(unsealed.body.dr);
+      const payload = JSON.parse(bytesToUtf8(plainBytes));
+      wipe(plainBytes);
+
+      // Если мы приняли встречный X3DH или получили ответ без X3DH — наш pendingHandshake завершён
+      const keepPendingHandshake =
+        existingMeta?.pendingHandshake && hs && !shouldAcceptHandshake && !isSameAcceptedFlight
+          ? existingMeta.pendingHandshake
+          : null;
+
+      const nextMeta = {
+        peerIdentity,
+        pendingHandshake: keepPendingHandshake,
+        acceptedEphemeralPub,
+        verified: Boolean(existingMeta?.verified),
+      };
+      await this._persistSession(peerId, session, nextMeta);
+
+      return {
+        senderId: peerId,
+        senderIdentity: peerIdentity,
+        sentAt: unsealed.sentAt,
+        payload,
+      };
     });
-
-    const peerIdentity = unsealed.sender;
-    const peerId = peerIdentity.userId;
-    const existingMeta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
-
-    // Защита от скрытой подмены ключа собеседника (Key Pinning / TOFU + предупреждение о смене)
-    if (
-      existingMeta?.peerIdentity &&
-      (existingMeta.peerIdentity.ikSignPub !== peerIdentity.ikSignPub ||
-        existingMeta.peerIdentity.ikDhPub !== peerIdentity.ikDhPub) &&
-      !existingMeta.allowKeyChange
-    ) {
-      throw new Error(`ВНИМАНИЕ: изменился ключ безопасности пользователя ${peerId}! Сверьте код безопасности.`);
-    }
-
-    let session = await this._loadSession(peerId).catch(() => null);
-
-    // Если в пакете есть заголовок X3DH и сессия ещё не создана (либо оба пира начали диалог одновременно —
-    // детерминированно побеждает инициатор с лексикографически меньшим userId)
-    const shouldAcceptHandshake =
-      unsealed.body.x3dh &&
-      (!session || (existingMeta?.pendingHandshake && peerId < this.identity.userId));
-
-    if (shouldAcceptHandshake) {
-      const hs = unsealed.body.x3dh;
-      const spkPriv = await this.store.getNativeKey(`spk:${hs.spkId}`);
-      const spkMeta = await this.store.getEncryptedRecord(`spkMeta:${hs.spkId}`);
-      if (!spkPriv || !spkMeta) {
-        throw new Error(`Не найден локальный SignedPreKey #${hs.spkId}`);
-      }
-      let opkObj = null;
-      if (hs.opkId !== null && hs.opkId !== undefined) {
-        const opkPriv = await this.store.getNativeKey(`opk:${hs.opkId}`);
-        if (!opkPriv) throw new Error(`Одноразовый ключ OPK #${hs.opkId} уже использован или отсутствует`);
-        opkObj = { keyId: hs.opkId, privateKey: opkPriv };
-      }
-
-      const x3dhOut = await x3dhRespond({
-        bobIdentity: this.identity.publicIdentity,
-        bobPrivateKeys: this.identity.privateKeys,
-        bobSignedPreKey: { keyId: hs.spkId, privateKey: spkPriv },
-        bobOneTimePreKey: opkObj,
-        handshake: hs,
-      });
-
-      // Немедленно удаляем использованный одноразовый ключ OPK (Forward Secrecy рукопожатия!)
-      if (opkObj) {
-        await this.store.deleteNativeKey(`opk:${opkObj.keyId}`);
-      }
-
-      session = await DoubleRatchetSession.initAsResponder({
-        sharedSecret: x3dhOut.sharedSecret,
-        associatedData: x3dhOut.associatedData,
-        localRatchetPrivateKey: spkPriv,
-        localRatchetPubRaw: fromBase64Url(spkMeta.pubRawB64),
-      });
-    }
-
-    if (!session) {
-      throw new Error(`Сессия Double Ratchet с ${peerId} отсутствует и заголовок X3DH не передан`);
-    }
-
-    const plainBytes = await session.decrypt(unsealed.body.dr);
-    const payload = JSON.parse(bytesToUtf8(plainBytes));
-    wipe(plainBytes);
-
-    // Как только мы получили ответ от собеседника, pendingHandshake больше не нужно дублировать
-    const nextMeta = {
-      peerIdentity,
-      pendingHandshake: existingMeta?.pendingHandshake && !unsealed.body.x3dh ? null : null,
-      verified: Boolean(existingMeta?.verified),
-    };
-    await this._persistSession(peerId, session, nextMeta);
-
-    return {
-      senderId: peerId,
-      senderIdentity: peerIdentity,
-      sentAt: unsealed.sentAt,
-      payload,
-    };
   }
 
-  /** Вычисление кода безопасности (60 цифр + 8 эмодзи + QR) для чата с peerId */
+  /** Вычисление кода безопасности (60 цифр + 128-битный HEX + QR) для чата с peerId */
   async getSafetyNumber({ peerId }) {
     this._requireIdentity();
     const meta = await this.store.getEncryptedRecord(`peerMeta:${peerId}`);
@@ -348,7 +451,7 @@ export class CryptoEngine {
     return decryptDownloadedFile(bytes, descriptor);
   }
 
-  /** Шифрование/расшифровка анонимного вопроса «Голой правды» */
+  /** Шифрование/расшифровка анонимного обращения E2E-шлюза */
   async encryptAsk({ recipientIkDhPubB64, text }) {
     return encryptAnonymousQuestion({ recipientIkDhPubB64, text });
   }
@@ -362,15 +465,17 @@ export class CryptoEngine {
     });
   }
 
-  /** Экстренный сброс расшифрованных сессий из оперативной памяти воркера («Прикрыться») */
+  /** Экстренная очистка расшифрованных сессий из оперативной памяти воркера */
   lockRamCache() {
-    for (const s of this.sessions.values()) {
-      if (s.rootKey) wipe(s.rootKey);
-      if (s.sendChainKey) wipe(s.sendChainKey);
-      if (s.recvChainKey) wipe(s.recvChainKey);
-    }
-    this.sessions.clear();
-    return { locked: true };
+    return this._runSerialized(() => {
+      for (const s of this.sessions.values()) {
+        if (s.rootKey) wipe(s.rootKey);
+        if (s.sendChainKey) wipe(s.sendChainKey);
+        if (s.recvChainKey) wipe(s.recvChainKey);
+      }
+      this.sessions.clear();
+      return { locked: true };
+    });
   }
 
   _requireIdentity() {

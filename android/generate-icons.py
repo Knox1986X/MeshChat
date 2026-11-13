@@ -42,11 +42,11 @@ def render_icon(size):
                 row.extend((0, 0, 0, 0))
                 continue
 
-            # Градиент тёмного индиго фона
+            # Графитово-обсидиановый фон без фиолетового оттенка
             t_bg = (nx + ny) * 0.5
-            r = int(38 * (1 - t_bg) + 21 * t_bg)
-            g = int(34 * (1 - t_bg) + 19 * t_bg)
-            b = int(68 * (1 - t_bg) + 41 * t_bg)
+            r = int(20 * (1 - t_bg) + 9 * t_bg)
+            g = int(27 * (1 - t_bg) + 11 * t_bg)
+            b = int(38 * (1 - t_bg) + 15 * t_bg)
 
             # Геометрия щита
             dx = abs(nx - 0.5)
@@ -63,9 +63,9 @@ def render_icon(size):
 
             if in_shield:
                 tg = (nx + ny) * 0.5
-                r = int(155 * (1 - tg) + 74 * tg)
-                g = int(123 * (1 - tg) + 120 * tg)
-                b = int(255 * (1 - tg) + 255 * tg)
+                r = int(37 * (1 - tg) + 30 * tg)
+                g = int(99 * (1 - tg) + 58 * tg)
+                b = int(235 * (1 - tg) + 138 * tg)
 
                 # Линии Mesh-созвездия
                 on_white = False

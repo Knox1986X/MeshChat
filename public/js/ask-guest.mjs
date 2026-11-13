@@ -1,6 +1,6 @@
-// Гостевой скрипт «Голой правды» (/q/<username>).
-// Скачивает публичный ключ получателя, решает анти-спам задачу Proof-of-Work и шифрует вопрос
-// прямо в браузере гостя (ECDH P-256 + HKDF + AES-256-GCM) перед отправкой на сервер.
+// Внешний клиент шлюза зашифрованных обращений (/q/<username>).
+// Загружает публичный ключ получателя, вычисляет анти-спам задачу Proof-of-Work и шифрует текст
+// локально в браузере отправителя (ECDH P-256 + HKDF + AES-256-GCM) до передачи на узел.
 
 import { html, render, useState, useEffect } from '../vendor/preact.mjs';
 import { solveProofOfWork } from '../../shared/crypto/kdf.mjs';
@@ -21,7 +21,7 @@ function AskPage() {
         if (!ok || d.error) setError(d.error || 'Получатель не найден');
         else setInfo(d);
       })
-      .catch(() => setError('Ошибка соединения с узлом'));
+      .catch(() => setError('Ошибка соединения с узлом ретрансляции'));
   }, []);
 
   const submit = async (e) => {
@@ -52,7 +52,7 @@ function AskPage() {
         }),
       });
       const out = await res.json();
-      if (!res.ok || out.error) throw new Error(out.error || 'Не удалось доставить вопрос');
+      if (!res.ok || out.error) throw new Error(out.error || 'Не удалось доставить пакет');
       setSent(true);
       setText('');
     } catch (err) {
@@ -64,37 +64,37 @@ function AskPage() {
 
   if (error && !info) {
     return html`<div>
-      <h2>Ссылка недоступна</h2>
+      <h2 style="margin-top:0">Шлюз недоступен</h2>
       <p class="modal-desc">${error}</p>
-      <a class="btn-primary" href="/">Открыть мессенджер</a>
+      <a class="btn-primary" href="/">Открыть MeshChat</a>
     </div>`;
   }
 
   if (!info) {
-    return html`<div class="boot-loader"><div class="spinner"></div><span>Проверка ключа @${targetUsername}…</span></div>`;
+    return html`<div class="boot-loader"><div class="spinner"></div><span>Верификация ключа @${targetUsername}…</span></div>`;
   }
 
   return html`<form onSubmit=${submit} class="auth-form">
-    <h2>🎭 Анонимный вопрос для @${info.username}</h2>
+    <h2 style="margin:0 0 4px;font-size:18px">Зашифрованное обращение к @${info.username}</h2>
     <p class="modal-desc">
-      Регистрация не нужна. Ваш текст шифруется в этом браузере публичным ключом
-      <code>${info.ikDhPub.slice(0, 14)}…</code> — сервер видит только шифртекст и не хранит ваш IP.
+      Регистрация не требуется. Сообщение шифруется локально публичным ключом ECDH P-256
+      (<code>${info.ikDhPub.slice(0, 16)}…</code>). Узел принимает только шифртекст и не сохраняет IP-адрес.
     </p>
 
-    ${sent && html`<div class="recovery-box">✓ Зашифрованный вопрос доставлен в слепой ящик получателя!</div>`}
+    ${sent && html`<div class="recovery-box">Пакет зашифрован и помещён в слепой почтовый ящик получателя.</div>`}
     ${error && html`<div class="auth-error">${error}</div>`}
 
     <input
       class="field-input"
       type="text"
       maxLength="1000"
-      placeholder="Напишите анонимное сообщение…"
+      placeholder="Текст зашифрованного обращения…"
       value=${text}
       onInput=${(e) => { setSent(false); setText(e.target.value); }}
     />
 
     <button type="submit" class="btn-primary full" disabled=${sending || text.trim().length < 2}>
-      ${sending ? 'Шифрование E2E + Proof-of-Work…' : 'Зашифровать и отправить анонимно'}
+      ${sending ? 'Шифрование E2E + Proof-of-Work…' : 'Зашифровать и отправить'}
     </button>
   </form>`;
 }
