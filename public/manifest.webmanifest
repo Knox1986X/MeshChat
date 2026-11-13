@@ -1,0 +1,16 @@
+{
+  "name": "MeshChat",
+  "short_name": "MeshChat",
+  "description": "Анонимный мультитранспортный E2E-мессенджер (Signal Protocol + P2P Mesh + Tor/I2P)",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#222032",
+  "theme_color": "#222032",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

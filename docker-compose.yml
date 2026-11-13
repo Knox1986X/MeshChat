@@ -1,0 +1,105 @@
+# Полный бесплатный self-hosted стек Veil Messenger:
+#   - veil: слепой E2E-сервер (Node.js 20 Alpine, без внешних npm-пакетов)
+#   - tor:  автоматический скрытый сервис Tor Onion v3 (.onion)
+#   - i2pd: автоматический скрытый узел Invisible Internet Project (.b32.i2p)
+#   - coturn (профиль "turn"): опциональный эфемерный TURN-ретранслятор без логов IP
+
+services:
+  veil:
+    build: .
+    container_name: veil-server
+    restart: unless-stopped
+    ports:
+      # Для работы ТОЛЬКО в даркнете укажите LISTEN_BIND=127.0.0.1 в .env
+      - "${LISTEN_BIND:-0.0.0.0}:${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /data
+      STRICT_FRAME: "1"
+      INVITE_ONLY: "${INVITE_ONLY:-0}"
+      POW_BITS: "${POW_BITS:-14}"
+      MAX_BLOB_MB: "${MAX_BLOB_MB:-50}"
+      ONION_ADDRESS: "${ONION_ADDRESS:-}"
+      I2P_ADDRESS: "${I2P_ADDRESS:-}"
+      TURN_HOST: "${TURN_HOST:-}"
+      TURN_PORT: "${TURN_PORT:-3478}"
+      TURN_SECRET: "${TURN_SECRET:-}"
+      METRICS_TOKEN: "${METRICS_TOKEN:-}"
+      # Опциональное бесплатное облачное зеркало снапшотов (Cloudflare R2 10 ГБ / Backblaze B2 10 ГБ)
+      S3_ENDPOINT: "${S3_ENDPOINT:-}"
+      S3_REGION: "${S3_REGION:-auto}"
+      S3_BUCKET: "${S3_BUCKET:-}"
+      S3_KEY_ID: "${S3_KEY_ID:-}"
+      S3_SECRET: "${S3_SECRET:-}"
+      S3_PREFIX: "${S3_PREFIX:-veil}"
+    volumes:
+      - veil-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - veil-net
+
+  tor:
+    image: alpine:3.20
+    container_name: veil-tor
+    restart: unless-stopped
+    depends_on:
+      - veil
+    command: >
+      sh -c "apk add --no-cache tor &&
+             mkdir -p /var/lib/tor/veil_hs &&
+             chmod 700 /var/lib/tor /var/lib/tor/veil_hs &&
+             tor -f /etc/tor/torrc"
+    volumes:
+      - ./deploy/tor/torrc:/etc/tor/torrc:ro
+      - tor-hs:/var/lib/tor
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - veil-net
+
+  i2pd:
+    image: purplei2p/i2pd:release-2.54.0
+    container_name: veil-i2pd
+    restart: unless-stopped
+    depends_on:
+      - veil
+    command: --conf=/home/i2pd/conf/i2pd.conf --tunconf=/home/i2pd/conf/tunnels.conf --datadir=/home/i2pd/data
+    volumes:
+      - ./deploy/i2pd:/home/i2pd/conf:ro
+      - i2pd-data:/home/i2pd/data
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - veil-net
+
+  coturn:
+    image: coturn/coturn:4.6-alpine
+    container_name: veil-coturn
+    profiles: ["turn"]
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:-change_me_random_hex}
+      - --realm=veil.local
+      - --no-tlsv1
+      - --no-tlsv1_1
+      - --no-stdout-log
+      - --log-file=/dev/null
+      - --no-cli
+
+volumes:
+  veil-data:
+  tor-hs:
+  i2pd-data:
+
+networks:
+  veil-net:
+    driver: bridge

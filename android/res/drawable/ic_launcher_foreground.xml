@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="128"
+    android:viewportHeight="128">
+    <!-- Щит MeshChat -->
+    <path
+        android:fillColor="#6D60F6"
+        android:pathData="M64,26 L94,37 L94,59 C94,79 81,94 64,99 C47,94 34,79 34,59 L34,37 Z" />
+    <!-- Связи P2P Mesh -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M50,54 L64,44 L78,54 L73,73 L55,73 Z M50,54 L73,73 M78,54 L55,73" />
+    <!-- Узлы Mesh-сети -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M64,44 m-4.5,0 a4.5,4.5 0 1,0 9,0 a4.5,4.5 0 1,0 -9,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,54 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,54 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M55,73 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M73,73 m-4.2,0 a4.2,4.2 0 1,0 8.4,0 a4.2,4.2 0 1,0 -8.4,0" />
+</vector>

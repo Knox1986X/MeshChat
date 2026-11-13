@@ -1,0 +1,18 @@
+{
+  "name": "meshchat",
+  "version": "1.1.0",
+  "versionCode": 2,
+  "description": "MeshChat — Анонимный E2E-мессенджер (X3DH + Double Ratchet + Sealed Sender + P2P Mesh & Tor/I2P)",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:crypto": "node --test tests/crypto.test.mjs",
+    "bridge": "node tools/local-proxy-bridge.mjs",
+    "build:apk": "bash android/build-apk.sh"
+  },
+  "license": "MIT"
+}

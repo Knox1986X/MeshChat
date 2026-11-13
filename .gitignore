@@ -1,0 +1,7 @@
+node_modules/
+data/
+.env
+*.log
+*.jks
+*.keystore
+Unselected files/

@@ -1,0 +1,39 @@
+# Конфигурация деплоя на Fly.io (минимальная shared-cpu-1x машина 256 МБ RAM + постоянный том 1 ГБ).
+# Запуск: fly launch --copy-config --no-deploy && fly volumes create veil_data --size 1 && fly deploy
+
+app = "meshchat"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  DATA_DIR = "/data"
+  STRICT_FRAME = "1"
+  TRUST_PROXY = "1"
+  POW_BITS = "14"
+
+[[mounts]]
+  source = "veil_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1

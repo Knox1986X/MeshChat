@@ -1,0 +1,15 @@
+# Конфигурация скрытого сервиса Tor Onion v3 для Veil Messenger.
+# Не открывает исходящий SOCKS-порт наружу и включает встроенную защиту точек входа от DoS.
+
+SocksPort 0
+Log notice stdout
+DataDirectory /var/lib/tor
+
+HiddenServiceDir /var/lib/tor/veil_hs/
+HiddenServiceVersion 3
+HiddenServicePort 80 veil:3000
+
+# Защита скрытого сервиса от флуда точками рандеву (Tor >= 0.4.8)
+HiddenServiceEnableIntroDoSDefense 1
+HiddenServiceEnableIntroDoSRatePerSec 25
+HiddenServiceEnableIntroDoSBurstPerSec 200

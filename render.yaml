@@ -1,0 +1,38 @@
+# Бесплатный деплой в 1 клик на Render.com (Free Web Service, без привязки карты для статики/веб-сервиса).
+# Так как диск на Render Free эфемерный (очищается при засыпании инстанса), укажите бесплатный бакет
+# Cloudflare R2 (10 ГБ бесплатно) или Backblaze B2 (10 ГБ бесплатно) — сервер автоматически
+# зеркалирует зашифрованные снапшоты и восстанавливает их при пробуждении.
+
+services:
+  - type: web
+    name: meshchat
+    runtime: node
+    plan: free
+    buildCommand: "echo 'Zero-dependency build OK'"
+    startCommand: "node server/index.mjs"
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STRICT_FRAME
+        value: "1"
+      - key: TRUST_PROXY
+        value: "1"
+      - key: POW_BITS
+        value: "14"
+      - key: INVITE_ONLY
+        value: "0"
+      - key: METRICS_TOKEN
+        generateValue: true
+      - key: TURN_SECRET
+        generateValue: true
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        value: auto
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_KEY_ID
+        sync: false
+      - key: S3_SECRET
+        sync: false
