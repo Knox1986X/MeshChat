@@ -1,12 +1,14 @@
-// Главный экран Android-приложения MeshChat v1.3.
-// Запускает локальный Orbot/I2P SOCKS5-мост (127.0.0.1:17700), встроенный узел (127.0.0.1:17701),
-// аппаратное хранилище сессии в AndroidKeyStore (MeshNativeVault) и автообновление через GitHub Releases.
+// Главный экран Android-приложения MeshChat v1.4.
+// Запускает изолированный SOCKS5-мост (127.0.0.1:27700) и собственный локальный узел (127.0.0.1:27701),
+// сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault)
+// и позволяет в 1 нажатие удалить устаревшую копию пакета org.meshchat.app (v1.1/v1.2).
 
 package org.meshchat.app;
 
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -31,6 +33,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 1001;
     private static final int REQ_RECORD_AUDIO = 1002;
     public static final int REQ_INSTALL_UNKNOWN_APPS = 1003;
+    private static final String LEGACY_PACKAGE = "org.meshchat.app";
 
     private WebView webView;
     private MeshSocksBridge socksBridge;
@@ -68,13 +71,42 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.parseColor("#0b0d14"));
         configureWebView(webView);
 
+        // При обновлении версии очищаем ТОЛЬКО HTTP-кеш файлов (IndexedDB и AndroidKeyStore не затрагиваются!)
+        int currentVerCode = getCurrentVersionCode();
+        SharedPreferences prefs = getSharedPreferences("meshchat_meta", MODE_PRIVATE);
+        int prevVerCode = prefs.getInt("last_ver_code", -1);
+        if (prevVerCode != currentVerCode) {
+            webView.clearCache(true);
+            prefs.edit().putInt("last_ver_code", currentVerCode).apply();
+        }
+
         root.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
         setContentView(root);
 
-        webView.loadUrl("http://127.0.0.1:" + MeshLocalNode.LOCAL_PORT + "/");
+        int port = localNode.getBoundPort();
+        webView.loadUrl("http://127.0.0.1:" + port + "/?v=" + currentVerCode);
+    }
+
+    private int getCurrentVersionCode() {
+        try {
+            PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return pi.versionCode;
+        } catch (Exception e) {
+            return 5;
+        }
+    }
+
+    private boolean isLegacyPackageInstalled() {
+        if (LEGACY_PACKAGE.equals(getPackageName())) return false;
+        try {
+            getPackageManager().getPackageInfo(LEGACY_PACKAGE, 0);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void configureWebView(WebView wv) {
@@ -215,10 +247,26 @@ public final class MainActivity extends Activity {
                 o.put("packageName", getPackageName());
                 o.put("versionName", pi.versionName);
                 o.put("versionCode", pi.versionCode);
+                o.put("localPort", localNode != null ? localNode.getBoundPort() : MeshLocalNode.LOCAL_PORT);
+                o.put("bridgePort", socksBridge != null ? socksBridge.getBoundPort() : MeshSocksBridge.BRIDGE_PORT);
+                o.put("legacyInstalled", isLegacyPackageInstalled());
                 return o.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"io.meshchat.app\"}";
+                return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false}";
             }
+        }
+
+        @JavascriptInterface
+        public void uninstallLegacyPackage() {
+            if (!isLegacyPackageInstalled()) return;
+            runOnUiThread(() -> {
+                try {
+                    Intent del = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + LEGACY_PACKAGE));
+                    del.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(del);
+                } catch (Exception ignored) {
+                }
+            });
         }
 
         @JavascriptInterface

@@ -19,23 +19,34 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MeshSocksBridge {
-    public static final int BRIDGE_PORT = 17700;
+    public static final int BRIDGE_PORT = 27700;
     public static final int[] TOR_PORTS = new int[]{9050, 9150};
     public static final int[] I2P_PORTS = new int[]{4447};
 
     private ServerSocket serverSocket;
+    private volatile int boundPort = BRIDGE_PORT;
     private volatile boolean running = false;
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
     public synchronized void start() {
-        if (running) return;
-        try {
-            serverSocket = new ServerSocket(BRIDGE_PORT, 32, InetAddress.getByName("127.0.0.1"));
-            running = true;
-            pool.execute(this::acceptLoop);
-        } catch (IOException ignored) {
-            // Порт уже занят предыдущим экземпляром процесса
+        if (running && serverSocket != null && !serverSocket.isClosed()) return;
+        for (int candidate = BRIDGE_PORT; candidate <= BRIDGE_PORT + 8; candidate++) {
+            try {
+                ServerSocket srv = new ServerSocket();
+                srv.setReuseAddress(true);
+                srv.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), candidate), 32);
+                serverSocket = srv;
+                boundPort = candidate;
+                running = true;
+                pool.execute(this::acceptLoop);
+                return;
+            } catch (IOException ignored) {
+            }
         }
+    }
+
+    public int getBoundPort() {
+        return boundPort;
     }
 
     public synchronized void stop() {

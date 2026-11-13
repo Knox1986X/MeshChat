@@ -37,8 +37,8 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.3.0';
-export const APP_VERSION_CODE = 4;
+export const APP_VERSION = '1.4.0';
+export const APP_VERSION_CODE = 5;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -207,6 +207,7 @@ export const store = {
   android: {
     isApk: Boolean(globalThis.MeshChatAndroid),
     packageName: 'io.meshchat.app',
+    legacyInstalled: false,
     lanMeshRunning: false,
     lanUrl: '',
   },
@@ -216,7 +217,7 @@ export const store = {
     transportPolicy: TRANSPORT_POLICY.AUTO,
     onionUrl: '',
     i2pUrl: '',
-    localBridgeUrl: 'ws://127.0.0.1:17700',
+    localBridgeUrl: 'ws://127.0.0.1:27700',
     coverTraffic: false,
     sound: true,
     strictBossWipe: false,
@@ -391,6 +392,10 @@ function syncAndroidNativeBridge() {
     if (typeof globalThis.MeshChatAndroid.getAppInfoJson === 'function') {
       const info = JSON.parse(globalThis.MeshChatAndroid.getAppInfoJson() || '{}');
       if (info.packageName) store.android.packageName = info.packageName;
+      store.android.legacyInstalled = Boolean(info.legacyInstalled);
+      if (info.bridgePort) {
+        store.settings.localBridgeUrl = `ws://127.0.0.1:${info.bridgePort}`;
+      }
     }
     const raw = (store.settings.serverUrl || '').trim();
     if (typeof globalThis.MeshChatAndroid.setUpstreamServer === 'function') {
@@ -402,6 +407,12 @@ function syncAndroidNativeBridge() {
       store.android.lanUrl = st.url || '';
     }
   } catch { /* ignore */ }
+}
+
+export function uninstallLegacyApk() {
+  if (globalThis.MeshChatAndroid?.uninstallLegacyPackage) {
+    globalThis.MeshChatAndroid.uninstallLegacyPackage();
+  }
 }
 
 export function toggleAndroidLanMesh() {
@@ -632,6 +643,8 @@ export async function bootClientApp() {
 
   if (typeof window !== 'undefined') {
     const onWakeUp = () => {
+      syncAndroidNativeBridge();
+      notifyStore();
       if (store.me) syncNow().catch(() => {});
       if (store.settings.autoUpdateCheck !== false) {
         checkForUpdates({ silent: true });

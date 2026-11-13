@@ -11,6 +11,7 @@ import {
   toggleBossMode,
   updateClientSettings,
   toggleAndroidLanMesh,
+  uninstallLegacyApk,
   applyAppUpdate,
   dismissUpdateBanner,
   setNavTab,
@@ -80,6 +81,16 @@ function AuthScreen() {
   return html`<div class="auth-backdrop">
     <div class="auth-card">
       <${UpdateBanner} update=${update} />
+
+      ${android?.legacyInstalled && html`<div class="update-banner" style="margin-bottom:12px">
+        <div class="update-banner-row">
+          <div class="update-banner-copy">
+            <b>Найдена устаревшая копия MeshChat v1.2</b>
+            <span>Удалите старый ярлык, чтобы остался один обновляемый пакет</span>
+          </div>
+          <button type="button" class="btn-update-now" onClick=${uninstallLegacyApk}>Удалить v1.2</button>
+        </div>
+      </div>`}
 
       <div class="auth-brand">
         <div class="auth-logo"><${Icon} name="mesh" size=${26} /></div>

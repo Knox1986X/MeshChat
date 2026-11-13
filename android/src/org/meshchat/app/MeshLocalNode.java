@@ -11,6 +11,7 @@
 package org.meshchat.app;
 
 import android.content.Context;
+import android.content.pm.PackageInfo;
 import android.content.res.AssetManager;
 import android.util.Base64;
 
@@ -26,6 +27,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -56,7 +58,8 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 public final class MeshLocalNode {
-    public static final int LOCAL_PORT = 17701;
+    // Выделенный порт io.meshchat.app (исключает перехват старым процессом org.meshchat.app на 17701)
+    public static final int LOCAL_PORT = 27701;
     public static final int LAN_MESH_PORT = 3000;
 
     private static final String WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -80,6 +83,7 @@ public final class MeshLocalNode {
 
     private ServerSocket loopbackServer;
     private ServerSocket lanMeshServer;
+    private volatile int boundPort = LOCAL_PORT;
     private volatile boolean running = false;
     private volatile boolean lanRunning = false;
     private volatile String upstreamOnionOrigin = "";
@@ -133,13 +137,25 @@ public final class MeshLocalNode {
     }
 
     public synchronized void startLoopback() {
-        if (running) return;
-        try {
-            loopbackServer = new ServerSocket(LOCAL_PORT, 64, InetAddress.getByName("127.0.0.1"));
-            running = true;
-            pool.execute(() -> acceptLoop(loopbackServer, false));
-        } catch (IOException ignored) {
+        if (running && loopbackServer != null && !loopbackServer.isClosed()) return;
+        for (int candidate = LOCAL_PORT; candidate <= LOCAL_PORT + 14; candidate++) {
+            try {
+                ServerSocket srv = new ServerSocket();
+                srv.setReuseAddress(true);
+                srv.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), candidate), 64);
+                loopbackServer = srv;
+                boundPort = candidate;
+                running = true;
+                pool.execute(() -> acceptLoop(loopbackServer, false));
+                return;
+            } catch (IOException ignored) {
+                // Если порт занят фоновым процессом — переходим к следующему свободному порту
+            }
         }
+    }
+
+    public int getBoundPort() {
+        return boundPort;
     }
 
     public synchronized boolean setLanMeshEnabled(boolean enable) {
@@ -353,11 +369,18 @@ public final class MeshLocalNode {
         }
 
         if ("/api/version".equals(path)) {
+            String verName = "1.4.0";
+            int verCode = 5;
+            try {
+                PackageInfo pi = appContext.getPackageManager().getPackageInfo(appContext.getPackageName(), 0);
+                if (pi.versionName != null) verName = pi.versionName;
+                verCode = pi.versionCode;
+            } catch (Exception ignored) {}
             JSONObject res = new JSONObject();
             res.put("ok", true);
             res.put("app", "MeshChat");
-            res.put("version", "1.2.0");
-            res.put("versionCode", 3);
+            res.put("version", verName);
+            res.put("versionCode", verCode);
             res.put("apkAvailable", false);
             res.put("githubRepo", "Knox1986X/MeshChat");
             sendJson(out, 200, res);

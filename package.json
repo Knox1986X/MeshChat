@@ -1,7 +1,7 @@
 {
   "name": "meshchat",
-  "version": "1.3.0",
-  "versionCode": 4,
+  "version": "1.4.0",
+  "versionCode": 5,
   "description": "MeshChat — Защищённый E2E-мессенджер (X3DH + Double Ratchet + Sealed Sender + P2P Mesh & Tor/I2P)",
   "type": "module",
   "engines": {

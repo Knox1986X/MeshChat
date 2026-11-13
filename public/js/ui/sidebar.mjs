@@ -8,6 +8,7 @@ import {
   syncNow,
   notifyStore,
   setNavTab,
+  uninstallLegacyApk,
   applyAppUpdate,
   dismissUpdateBanner,
   APP_VERSION,
@@ -36,6 +37,7 @@ export function Sidebar() {
     meshStats,
     outbox,
     update,
+    android,
   } = store;
 
   const unreadChatsCount = Object.values(chats).filter((c) => (c.unread || 0) > 0).length;
@@ -154,6 +156,18 @@ export function Sidebar() {
         </div>
       </div>
     </div>
+
+    ${android?.legacyInstalled && html`<div class="sidebar-update-card">
+      <div class="sidebar-update-top">
+        <span class="sidebar-update-title">На телефоне осталась старая копия v1.2</span>
+      </div>
+      <div class="sidebar-update-sub">
+        Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v${APP_VERSION}
+      </div>
+      <button type="button" class="btn-update-now full" onClick=${uninstallLegacyApk}>
+        Удалить старую копию v1.2
+      </button>
+    </div>`}
 
     ${update?.available && !update.dismissed && html`<div class="sidebar-update-card">
       <div class="sidebar-update-top">
