@@ -50,7 +50,7 @@ python3 "$ANDROID_DIR/generate-icons.py"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR/compiled_res" "$WORK_DIR/gen" "$WORK_DIR/classes" "$WORK_DIR/dex" "$WORK_DIR/stage/assets/www"
 
-echo "[3/7] Упаковка клиентского ядра MeshChat v1.5 в assets/www..."
+echo "[3/7] Упаковка клиентского ядра MeshChat v1.6 в assets/www..."
 cp -R "$PROJECT_DIR/public" "$WORK_DIR/stage/assets/www/public"
 cp -R "$PROJECT_DIR/shared" "$WORK_DIR/stage/assets/www/shared"
 

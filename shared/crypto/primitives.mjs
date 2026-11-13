@@ -320,17 +320,28 @@ export async function generateNonExtractableDbKey() {
  * Формат: payload || 0x80 || 0x00 * k.
  * Короткое «ок» и абзац текста дают одинаковый размер шифртекста (512 Б).
  */
-export function padPayload(payloadBytes) {
+export function padPayload(payloadBytes, minBlockBytes = 0) {
   const minNeeded = payloadBytes.byteLength + 1;
+  const quantum = Number(minBlockBytes) || 0;
   let target = 0;
-  for (const b of PADDING_BUCKETS) {
-    if (b >= minNeeded) {
-      target = b;
-      break;
+
+  if (quantum === 256 && minNeeded <= 256) {
+    target = 256;
+  } else {
+    for (const b of PADDING_BUCKETS) {
+      if (b >= minNeeded && b >= quantum) {
+        target = b;
+        break;
+      }
+    }
+    if (quantum > 512 && minNeeded <= quantum) {
+      target = quantum;
     }
   }
+
   if (target === 0) {
-    target = Math.ceil(minNeeded / PADDING_BLOCK_ABOVE_MAX) * PADDING_BLOCK_ABOVE_MAX;
+    const step = quantum > 0 ? Math.max(quantum, PADDING_BLOCK_ABOVE_MAX) : PADDING_BLOCK_ABOVE_MAX;
+    target = Math.ceil(minNeeded / step) * step;
   }
   const out = new Uint8Array(target);
   out.set(payloadBytes, 0);

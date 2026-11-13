@@ -51,7 +51,17 @@ export class CryptoEngine {
     this.store = store;
     this.sessions = new Map(); // peerId -> DoubleRatchetSession (кеш в RAM воркера)
     this.identity = null;      // { userId, publicIdentity, privateKeys: { ikSignPriv, ikDhPriv } }
+    this.paddingBlockBytes = 512;
     this._mutex = Promise.resolve(); // Строгая FIFO-очередь для исключения гонок состояний храповика
+  }
+
+  /** Настройка криптопараметров времени выполнения (например, квант выравнивания ISO/IEC 7816-4) */
+  setCryptoConfig({ paddingBlockBytes } = {}) {
+    const q = Number(paddingBlockBytes);
+    if ([256, 512, 1024, 2048, 4096].includes(q)) {
+      this.paddingBlockBytes = q;
+    }
+    return { paddingBlockBytes: this.paddingBlockBytes };
   }
 
   /** Последовательное выполнение асинхронных операций с ключами и сессиями Double Ratchet */
@@ -211,11 +221,11 @@ export class CryptoEngine {
   }
 
   /** Локальный криптографический эхо-тест (AES-256-GCM + ISO/IEC 7816-4 выравнивание 512 Б + SHA-256) */
-  async loopbackSelfTest({ text = 'MeshChat E2EE Loopback Test' } = {}) {
+  async loopbackSelfTest({ text = 'MeshChat E2EE Loopback Test', paddingBlockBytes = 0 } = {}) {
     await this.store.open();
     const started = performance.now();
     const raw = utf8ToBytes(String(text));
-    const padded = padPayload(raw);
+    const padded = padPayload(raw, paddingBlockBytes || this.paddingBlockBytes || 512);
     const iv = randomBytes(12);
     const aad = utf8ToBytes('MESHCHAT-LOOPBACK-E2EE-v1');
     const ct = await aesGcmEncrypt(this.store._masterKey, iv, padded, aad);
@@ -464,6 +474,7 @@ export class CryptoEngine {
         recipientIkDhPubB64: meta.peerIdentity.ikDhPub,
         senderIdentity: this.identity.publicIdentity,
         innerObject,
+        minBlockBytes: this.paddingBlockBytes || 512,
       });
       return { sealedBytes };
     });

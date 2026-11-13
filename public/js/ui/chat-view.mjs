@@ -10,8 +10,10 @@ import {
   openEncryptedMedia,
   openPeerProfileModal,
   togglePinChat,
+  toggleMessageReaction,
   blockAnonQuestionAuthor,
   toggleBossMode,
+  copyWithPrivacy,
   showToast,
 } from '../store/app-store.mjs';
 import {
@@ -32,7 +34,7 @@ function statusLabel(status) {
 }
 
 export function ChatView() {
-  const { chats, messages, decryptedMediaUrls, ui, me } = store;
+  const { chats, messages, decryptedMediaUrls, ui, me, settings } = store;
   const chat = ui.activeChatId ? chats[ui.activeChatId] : null;
   const list = (chat && messages[chat.id]) || [];
 
@@ -93,14 +95,49 @@ export function ChatView() {
   const copyAskLink = () => {
     const base = store.settings.serverUrl ? store.settings.serverUrl.replace(/\/+$/, '') : location.origin;
     const link = `${base}/q/${me?.username}`;
-    navigator.clipboard?.writeText(link).catch(() => {});
-    showToast(`Адрес приёмного шлюза скопирован: ${link}`);
+    copyWithPrivacy(link, `Адрес приёмного шлюза скопирован: ${link}`);
   };
 
   const copyMessageText = (txt) => {
     if (!txt) return;
-    navigator.clipboard?.writeText(txt).catch(() => {});
-    showToast('Текст скопирован в буфер обмена');
+    copyWithPrivacy(txt, 'Текст скопирован в буфер обмена');
+  };
+
+  const startCallFlow = () => {
+    if (settings.confirmCall) {
+      if (typeof window !== 'undefined' && !window.confirm(`Начать защищённый голосовой P2P-вызов с ${displayTitle}?`)) {
+        return;
+      }
+    }
+    store.ui.modal = 'call';
+    store.ui.modalData = { chat };
+    notifyStore();
+  };
+
+  const onBubbleDoubleAction = (m) => {
+    const action = settings.doubleTapAction || 'reply';
+    if (action === 'none') return;
+    if (action === 'reply' && (chat.kind === 'dm' || chat.kind === 'echo')) {
+      store.ui.replyTo = m;
+      notifyStore();
+      showToast('Сообщение добавлено в цитату');
+    } else if (action === 'copy' && m.text) {
+      copyMessageText(m.text);
+    } else if (action === 'react' && (chat.kind === 'dm' || chat.kind === 'echo')) {
+      toggleMessageReaction(chat.id, m.id, '👍');
+    }
+  };
+
+  const onComposerKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    const enterSends = settings.enterToSend !== false;
+    if (enterSends && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit(e);
+    } else if (!enterSends && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      onSubmit(e);
+    }
   };
 
   let lastDateLabel = '';
@@ -161,7 +198,7 @@ export function ChatView() {
           type="button"
           class="circle-btn green"
           title="Голосовой P2P-канал (DTLS-SRTP)"
-          onClick=${() => { store.ui.modal = 'call'; store.ui.modalData = { chat }; notifyStore(); }}
+          onClick=${startCallFlow}
         ><${Icon} name="phone" size=${15} /></button>`}
 
         <button
@@ -187,7 +224,7 @@ export function ChatView() {
           ${showDay && html`<div class="date-pill-wrap"><span class="date-pill">${dayStr}</span></div>`}
 
           <div class=${`msg-row ${m.out ? 'outgoing' : 'incoming'}`}>
-            ${!m.out && html`<${AvatarBox}
+            ${!m.out && settings.showChatAvatars !== false && html`<${AvatarBox}
               title=${displayTitle}
               username=${chat.username}
               avatarDataUrl=${chat.peerProfile?.avatarDataUrl || ''}
@@ -199,13 +236,14 @@ export function ChatView() {
             <div
               class=${`msg-bubble ${m.out ? 'bubble-out' : isSystemNotice ? 'bubble-amber' : 'bubble-in'} ${activeMsgActionsId === m.id ? 'actions-open' : ''}`}
               onClick=${() => setActiveMsgActionsId((cur) => (cur === m.id ? null : m.id))}
+              onDblClick=${() => onBubbleDoubleAction(m)}
             >
               <div class="msg-meta-top">
                 <span class="msg-author">
                   ${m.out ? 'Вы' : m.type === 'ask' ? 'Анонимный отправитель (E2E)' : displayTitle}
                 </span>
                 <span class="msg-time">
-                  ${formatTime(m.ts)}
+                  ${formatTime(m.ts, settings.timeFormat)}
                   ${m.expiresAt > 0 && html` · TTL`}
                   ${m.out && html` · <span class=${`msg-status-tag ${m.status || 'sent'}`}>${statusLabel(m.status)}</span>`}
                 </span>
@@ -250,6 +288,15 @@ export function ChatView() {
 
               ${m.text && html`<div class="msg-text"><${RichMessageText} text=${m.text} /></div>`}
 
+              ${m.reactions && Object.keys(m.reactions).length > 0 && html`<div class="msg-reactions-row" onClick=${(e) => e.stopPropagation()}>
+                ${Object.entries(m.reactions).map(([emoji, users]) => html`<button
+                  key=${emoji}
+                  type="button"
+                  class=${`reaction-pill ${users.includes(me?.userId) ? 'mine' : ''}`}
+                  onClick=${() => toggleMessageReaction(chat.id, m.id, emoji)}
+                ><span>${emoji}</span><b>${users.length}</b></button>`)}
+              </div>`}
+
               ${m.type === 'ask' && m.senderBlockTag && html`<div class="ask-actions">
                 <button type="button" onClick=${() => blockAnonQuestionAuthor(m.senderBlockTag)}>
                   Заблокировать отправителя (слепой HMAC)
@@ -257,6 +304,14 @@ export function ChatView() {
               </div>`}
 
               ${(chat.kind === 'dm' || chat.kind === 'echo') && html`<div class="msg-hover-bar" onClick=${(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  title="Отметка 👍"
+                  onClick=${() => {
+                    toggleMessageReaction(chat.id, m.id, '👍');
+                    setActiveMsgActionsId(null);
+                  }}
+                >👍</button>
                 <button
                   type="button"
                   title="Цитировать сообщение"
@@ -316,15 +371,19 @@ export function ChatView() {
               onClick=${() => setOnceToggle((v) => !v)}
             ><${Icon} name="once" size=${17} /></button>`}
 
-            <input
+            <textarea
               class="composer-input"
-              type="text"
+              rows="1"
+              spellcheck=${settings.spellcheck !== false}
               placeholder=${chat.kind === 'echo'
                 ? 'Текст для эхо-проверки E2EE…'
-                : 'Сообщение (E2EE)…'}
+                : settings.enterToSend === false
+                  ? 'Сообщение (Ctrl+Enter — отправить)…'
+                  : 'Сообщение (E2EE)…'}
               value=${draft}
               onInput=${(e) => setDraft(e.target.value)}
-            />
+              onKeyDown=${onComposerKeyDown}
+            ></textarea>
 
             <button
               type="button"

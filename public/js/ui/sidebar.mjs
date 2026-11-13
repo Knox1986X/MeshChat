@@ -105,7 +105,7 @@ export function Sidebar() {
           </span>
           <span class="chat-time-box">
             ${c.pinned && html`<span class="pin-mini" title="Закреплён"><${Icon} name="pin" size=${11} /></span>`}
-            <span>${formatTime(c.lastTs)}</span>
+            <span>${formatTime(c.lastTs, store.settings.timeFormat)}</span>
           </span>
         </div>
 

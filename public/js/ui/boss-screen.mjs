@@ -33,8 +33,35 @@ function synthTone(freq, delay, duration, { type = 'sine', gain = 0.05, endFreq 
   osc.stop(start + duration + 0.025);
 }
 
-export function playSfx(kind) {
+export function playSfx(kind, profile = 'crystal') {
   try {
+    if (kind === 'click') {
+      synthTone(440, 0, 0.025, { gain: 0.025 });
+      return;
+    }
+    if (profile === 'soft') {
+      if (kind === 'sent') synthTone(380, 0, 0.045, { endFreq: 430, gain: 0.025 });
+      else if (kind === 'incoming') synthTone(460, 0, 0.075, { endFreq: 540, gain: 0.032 });
+      else if (kind === 'burn') synthTone(280, 0, 0.09, { type: 'triangle', endFreq: 160, gain: 0.03 });
+      return;
+    }
+    if (profile === 'sonar') {
+      if (kind === 'sent') synthTone(740, 0, 0.06, { endFreq: 880, gain: 0.038 });
+      else if (kind === 'incoming') {
+        synthTone(880, 0, 0.09, { gain: 0.048 });
+        synthTone(880, 0.12, 0.14, { gain: 0.035 });
+      } else if (kind === 'burn') synthTone(420, 0, 0.12, { type: 'triangle', endFreq: 190, gain: 0.045 });
+      return;
+    }
+    if (profile === 'pulse') {
+      if (kind === 'sent') synthTone(480, 0, 0.05, { type: 'triangle', endFreq: 720, gain: 0.04 });
+      else if (kind === 'incoming') {
+        synthTone(520, 0, 0.06, { type: 'triangle', gain: 0.05 });
+        synthTone(780, 0.065, 0.09, { type: 'triangle', gain: 0.048 });
+      } else if (kind === 'burn') synthTone(330, 0, 0.11, { type: 'sawtooth', endFreq: 150, gain: 0.035 });
+      return;
+    }
+    // По умолчанию: профиль «crystal»
     if (kind === 'sent') {
       synthTone(520, 0, 0.055, { endFreq: 680, gain: 0.04 });
     } else if (kind === 'incoming') {
@@ -48,10 +75,21 @@ export function playSfx(kind) {
 
 // ─────────────────────── Форматирование времени и объёма данных ───────────────────────
 
-export function formatTime(ts) {
+export function formatTime(ts, mode = '24h') {
   if (!ts) return '';
   const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const hh = d.getHours();
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  if (mode === '12h') {
+    const suffix = hh >= 12 ? 'PM' : 'AM';
+    const h12 = hh % 12 || 12;
+    return `${h12}:${mm} ${suffix}`;
+  }
+  if (mode === '24h_sec') {
+    return `${String(hh).padStart(2, '0')}:${mm}:${ss}`;
+  }
+  return `${String(hh).padStart(2, '0')}:${mm}`;
 }
 
 const WEEKDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
@@ -213,6 +251,13 @@ const ICON_PATHS = {
   edit: html`<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>`,
   refresh: html`<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>`,
   download: html`<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>`,
+  upload: html`<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>`,
+  key: html`<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>`,
+  sliders: html`<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>`,
+  volume: html`<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>`,
+  database: html`<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>`,
+  trash: html`<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>`,
+  terminal: html`<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>`,
   mesh: html`<path d="M12 3 4 7v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10V7l-8-4Z"/><circle cx="12" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/><circle cx="9.6" cy="15.2" r="1.3" fill="currentColor"/><circle cx="14.4" cy="15.2" r="1.3" fill="currentColor"/><path d="M8.5 11 12 8.5 15.5 11 14.4 15.2H9.6L8.5 11Z" stroke-width="1.3"/>`,
 };
 
@@ -311,7 +356,7 @@ const SAMPLE_ROWS = [
   ['ИТОГО ПО КОНТУРУ', '38 285,70', '38 760,00', '+1,24%', 'Свод сдан'],
 ];
 
-export function BossScreen({ title, onExit }) {
+export function BossScreen({ title, template = 'xlsx', onExit }) {
   const [selectedCell, setSelectedCell] = useState('C4');
   const [lastTapAt, setLastTapAt] = useState(0);
 
@@ -323,6 +368,40 @@ export function BossScreen({ title, onExit }) {
     }
     setLastTapAt(now);
   };
+
+  if (template === 'terminal') {
+    return html`<div class="boss-overlay boss-dark-term" onDblClick=${onExit} onTouchEnd=${onTouchUnlock}>
+      <div class="boss-topbar" style="background:#161b22;border-bottom:1px solid #30363d">
+        <span class="boss-badge">SSH</span>
+        <strong class="boss-doc-title">${title || 'build-worker-eu-04: ~/ci/pipeline'}</strong>
+        <button type="button" class="boss-unlock-btn" onClick=${onExit}>Вернуться</button>
+      </div>
+      <pre class="boss-term-body">[19:04:11] INFO  scheduler: проверка очереди задач сборки #4812
+[19:04:12] INFO  runner-04: компиляция модулей ядра (target=linux-arm64)
+[19:04:14] OK    unit-suite: 142/142 проверок пройдено за 1.84 с
+[19:04:15] INFO  artifact: контрольная сумма архива подтверждена
+[19:04:16] IDLE  ожидание следующего задания планировщика…</pre>
+    </div>`;
+  }
+
+  if (template === 'notes') {
+    return html`<div class="boss-overlay" onDblClick=${onExit} onTouchEnd=${onTouchUnlock}>
+      <div class="boss-topbar" style="background:#334155">
+        <span class="boss-badge">DOC</span>
+        <strong class="boss-doc-title">${title || 'Регламент_обслуживания_узлов_Q4.md'}</strong>
+        <button type="button" class="boss-unlock-btn" onClick=${onExit}>Вернуться</button>
+      </div>
+      <div class="boss-notes-body">
+        <h3>План плановых работ по инфраструктуре</h3>
+        <ul>
+          <li>Проверка резервных каналов связи и балансировщиков нагрузки — выполнено.</li>
+          <li>Ротация TLS-сертификатов внешних шлюзов — по расписанию (пятница, 02:00 UTC).</li>
+          <li>Контроль свободного места на томах хранения логов и метрик — в норме (78% свободно).</li>
+          <li>Сверка контрольных сумм сборок релизного контура — без замечаний.</li>
+        </ul>
+      </div>
+    </div>`;
+  }
 
   return html`<div class="boss-overlay" onDblClick=${onExit} onTouchEnd=${onTouchUnlock}>
     <div class="boss-topbar">

@@ -33,7 +33,12 @@ const ANON_ASK_INFO = utf8ToBytes('MSG-ANON-QUESTION-v1');
  * На выходе: бинарный буфер [version(1B) || ephemeralPub(65B) || aesGcmCiphertext].
  * Сервер видит только адрес почтового ящика Боба и случайный эфемерный ключ.
  */
-export async function sealSenderEnvelope({ recipientIkDhPubB64, senderIdentity, innerObject }) {
+export async function sealSenderEnvelope({
+  recipientIkDhPubB64,
+  senderIdentity,
+  innerObject,
+  minBlockBytes = 0,
+}) {
   const recipientPubRaw = fromBase64Url(recipientIkDhPubB64);
   const ephemeral = await generateEcdhKeyPair({ extractable: false });
   const ephemeralPubRaw = await exportRawPublicKey(ephemeral.publicKey);
@@ -52,7 +57,7 @@ export async function sealSenderEnvelope({ recipientIkDhPubB64, senderIdentity, 
     sentAt: Date.now(),
     body: innerObject,
   }));
-  const padded = padPayload(envelopePlain);
+  const padded = padPayload(envelopePlain, minBlockBytes);
   wipe(envelopePlain);
 
   try {

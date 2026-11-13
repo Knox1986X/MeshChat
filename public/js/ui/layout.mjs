@@ -22,7 +22,8 @@ import { Sidebar } from './sidebar.mjs';
 import { ChatView } from './chat-view.mjs';
 import { InspectorPanel } from './inspector-panel.mjs';
 import { MeshView } from './mesh-view.mjs';
-import { ProfileView, ContactsView, SettingsScreen } from './profile-view.mjs';
+import { ProfileView, ContactsView } from './profile-view.mjs';
+import { SettingsScreen, PinLockOverlay } from './settings-screen.mjs';
 import { ModalLayer } from './settings-modal.mjs';
 import { BossScreen, Icon } from './boss-screen.mjs';
 
@@ -235,12 +236,17 @@ export function AppRoot() {
   if (s.ui.bossActive) {
     return html`<${BossScreen}
       title=${s.settings.bossDocTitle}
+      template=${s.settings.bossTemplate || 'xlsx'}
       onExit=${() => toggleBossMode(false)}
     />`;
   }
 
   if (!s.me) {
     return html`<${AuthScreen} />`;
+  }
+
+  if (s.ui.pinLocked && s.settings.pinHashB64) {
+    return html`<${PinLockOverlay} />`;
   }
 
   const totalUnread = Object.values(s.chats).reduce((sum, c) => sum + (c.unread || 0), 0);

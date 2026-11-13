@@ -5,10 +5,14 @@
 import { useReducer, useEffect } from '../../vendor/preact.mjs';
 import {
   utf8ToBytes,
+  bytesToUtf8,
   randomBytes,
   toBase64Url,
   fromBase64Url,
   hmacSha256,
+  sha256,
+  aesGcmEncrypt,
+  aesGcmDecrypt,
 } from '../../../shared/crypto/primitives.mjs';
 import { CryptoWorkerClient } from '../crypto/worker-client.mjs';
 import {
@@ -37,12 +41,12 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.5.0';
-export const APP_VERSION_CODE = 6;
+export const APP_VERSION = '1.6.0';
+export const APP_VERSION_CODE = 7;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
-// Предустановленные темы оформления приложения
+// 10 предустановленных тем оформления приложения
 export const THEME_PRESETS = {
   obsidian: {
     id: 'obsidian',
@@ -57,12 +61,12 @@ export const THEME_PRESETS = {
   amoled: {
     id: 'amoled',
     label: 'AMOLED Pitch',
-    bg0: '#040507',
-    bg1: '#0a0c12',
-    bg2: '#12151f',
-    bg3: '#1a1e2c',
+    bg0: '#000000',
+    bg1: '#07090e',
+    bg2: '#10131d',
+    bg3: '#181d2b',
     accent: '#7b89ff',
-    bubbleOut: '#1e2749',
+    bubbleOut: '#1c2447',
   },
   emerald: {
     id: 'emerald',
@@ -104,6 +108,61 @@ export const THEME_PRESETS = {
     accent: '#f43f5e',
     bubbleOut: '#421826',
   },
+  amber: {
+    id: 'amber',
+    label: 'Tactical Amber',
+    bg0: '#0d0a05',
+    bg1: '#161108',
+    bg2: '#21190c',
+    bg3: '#2e2311',
+    accent: '#f59e0b',
+    bubbleOut: '#3b2b10',
+  },
+  cobalt: {
+    id: 'cobalt',
+    label: 'Nordic Cobalt',
+    bg0: '#060a13',
+    bg1: '#0c1322',
+    bg2: '#131e33',
+    bg3: '#1b2b48',
+    accent: '#3b82f6',
+    bubbleOut: '#19325c',
+  },
+  graphite: {
+    id: 'graphite',
+    label: 'Stealth Graphite',
+    bg0: '#0a0b0e',
+    bg1: '#121419',
+    bg2: '#1a1d24',
+    bg3: '#242832',
+    accent: '#94a3b8',
+    bubbleOut: '#262b38',
+  },
+  rose: {
+    id: 'rose',
+    label: 'Neon Rose',
+    bg0: '#0e070d',
+    bg1: '#170c15',
+    bg2: '#231220',
+    bg3: '#31192d',
+    accent: '#ec4899',
+    bubbleOut: '#401836',
+  },
+};
+
+export const DEFAULT_THEME = {
+  preset: 'obsidian',
+  customAccent: '#6d7cff',
+  customBg0: '#0b0d14',
+  customBubble: '',
+  avatarShape: 'squircle', // 'squircle' | 'rounded' | 'circle'
+  bubbleRadius: 16,        // 6 | 12 | 16 | 22
+  chatBackdrop: 'dots',    // 'dots' | 'grid' | 'diag' | 'stars' | 'none'
+  fontScale: 14,           // 12 | 13 | 14 | 15 | 16 | 18
+  fontFamily: 'system',    // 'system' | 'inter' | 'mono'
+  density: 'normal',       // 'compact' | 'normal' | 'spacious'
+  animations: true,
+  messageTail: true,
 };
 
 export const BANNER_PRESETS = {
@@ -137,6 +196,60 @@ function hexToRgba(hex, alpha = 0.16) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function liftHex(hex, add = 10) {
+  const clean = String(hex || '#0b0d14').replace('#', '');
+  const full = clean.length === 3
+    ? clean.split('').map((c) => c + c).join('')
+    : clean.padEnd(6, '0').slice(0, 6);
+  const num = parseInt(full, 16) || 0x0b0d14;
+  const clamp = (v) => Math.max(0, Math.min(255, v));
+  const r = clamp(((num >> 16) & 255) + add);
+  const g = clamp(((num >> 8) & 255) + add);
+  const b = clamp((num & 255) + add);
+  return `#${[r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('')}`;
+}
+
+export const DEFAULT_SETTINGS = {
+  serverUrl: globalThis.MeshChatAndroid ? DEFAULT_CLOUD_URL : '',
+  autoUpdateCheck: true,
+  transportPolicy: TRANSPORT_POLICY.AUTO,
+  onionUrl: '',
+  i2pUrl: '',
+  localBridgeUrl: 'ws://127.0.0.1:27700',
+  paddingBlockBytes: 512,     // 256 | 512 | 1024 | 2048 | 4096
+  coverTraffic: false,
+  coverIntervalSec: 25,       // 10 | 25 | 60
+  syncIntervalSec: 6,         // 3 | 6 | 15 | 30
+  webrtcIcePolicy: 'all',     // 'all' | 'relay'
+  customStunUrl: 'stun:stun.l.google.com:19302',
+
+  // Чаты, ввод и медиа
+  enterToSend: true,
+  defaultTtlSec: 0,           // 0 | 30 | 300 | 3600 | 86400 | 604800
+  timeFormat: '24h',          // '24h' | '24h_sec' | '12h'
+  showChatAvatars: true,
+  doubleTapAction: 'reply',   // 'reply' | 'copy' | 'react' | 'none'
+  autoDecryptMedia: 'always', // 'always' | '1mb' | 'manual'
+  confirmCall: false,
+  spellcheck: true,
+
+  // Приватность, PIN-блокировка и маскировка экрана
+  pinHashB64: '',
+  pinSaltB64: '',
+  autoLockMinutes: 0,         // 0 | 1 | 5 | 15 | 30
+  clipboardAutoClearSec: 0,   // 0 | 15 | 30 | 60
+  shareProfileE2ee: true,
+  acceptAnonGateway: true,
+  strictBossWipe: false,
+  bossTemplate: 'xlsx',       // 'xlsx' | 'terminal' | 'notes'
+  bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
+
+  // Звук и тактильная отдача
+  sound: true,
+  outgoingSound: true,
+  soundProfile: 'crystal',    // 'crystal' | 'pulse' | 'sonar' | 'soft'
+  haptics: 'soft',            // 'off' | 'soft' | 'strong'
+};
 export const store = {
   booting: true,
   busy: false,
@@ -149,24 +262,16 @@ export const store = {
     displayName: '',
     statusText: 'На связи · E2EE',
     bio: 'Сквозное шифрование Signal Protocol · Без метаданных',
-    badge: 'verified',        // 'none' | 'verified' | 'star' | 'bolt' | 'shield' | 'diamond'
-    avatarDataUrl: '',        // Сжатый локально аватар (data:image/jpeg;base64,...)
-    bannerPreset: 'amoled',   // Ключ из BANNER_PRESETS или 'custom'
+    badge: 'verified',
+    avatarDataUrl: '',
+    bannerPreset: 'amoled',
     bannerCustomColor: '#1b2242',
-    particles: 'stars',       // 'stars' | 'snow' | 'constellation' | 'pulse' | 'none'
+    particles: 'stars',
     updatedAt: 0,
   },
 
   // Кастомная тема и визуал приложения
-  theme: {
-    preset: 'obsidian',       // Ключ из THEME_PRESETS или 'custom'
-    customAccent: '#6d7cff',
-    customBg0: '#0b0d14',
-    customBubble: '',
-    avatarShape: 'squircle',  // 'squircle' | 'circle'
-    bubbleRadius: 16,         // 10 | 16 | 22
-    chatBackdrop: 'dots',     // 'none' | 'dots' | 'grid' | 'particles'
-  },
+  theme: { ...DEFAULT_THEME },
 
   // Состояние автообновления (GitHub Releases + /api/version + SHA-256 проверка APK)
   update: {
@@ -209,32 +314,23 @@ export const store = {
     packageName: 'io.meshchat.app',
     legacyInstalled: false,
     screenshotProtection: false,
+    keepScreenOn: false,
     lanMeshRunning: false,
     lanUrl: '',
   },
-  settings: {
-    serverUrl: globalThis.MeshChatAndroid ? DEFAULT_CLOUD_URL : '',
-    autoUpdateCheck: true,
-    transportPolicy: TRANSPORT_POLICY.AUTO,
-    onionUrl: '',
-    i2pUrl: '',
-    localBridgeUrl: 'ws://127.0.0.1:27700',
-    coverTraffic: false,
-    sound: true,
-    strictBossWipe: false,
-    bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
-  },
+  settings: { ...DEFAULT_SETTINGS },
 
   // Данные чатов и сообщений (расшифровываются из IndexedDB только в ОЗУ)
-  chats: {},              // chatId -> chatObj
-  messages: {},           // chatId -> msgObj[]
-  outbox: [],             // очередь зашифрованных конвертов для гарантированной досылки
-  decryptedMediaUrls: {}, // blobId -> objectURL
+  chats: {},
+  messages: {},
+  outbox: [],
+  decryptedMediaUrls: {},
 
   // Состояние интерфейса (5 разделов: Чаты, Контакты, Mesh, Профиль, Настройки)
   ui: {
-    navTab: 'chats',      // 'chats' | 'contacts' | 'mesh' | 'profile' | 'settings'
-    spaceFilter: 'all',   // 'all' | 'unread' | 'tor' | 'mesh' | 'ask'
+    navTab: 'chats',
+    spaceFilter: 'all',
+    settingsCategory: 'all',
     mobileTab: 'chats',
     activeChatId: null,
     inspectorOpen: false,
@@ -242,7 +338,8 @@ export const store = {
     replyTo: null,
     onceMode: false,
     bossActive: false,
-    modal: null,          // null | 'new-chat' | 'safety' | 'settings' | 'once-viewer' | 'call' | 'peer-profile' | 'edit-profile' | 'theme-studio'
+    pinLocked: false,
+    modal: null,
     modalData: null,
     toasts: [],
   },
@@ -275,10 +372,11 @@ export function showToast(text, kind = 'info') {
   const id = toBase64Url(randomBytes(6));
   store.ui.toasts = [...store.ui.toasts.slice(-1), { id, text, kind }];
   notifyStore();
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     store.ui.toasts = store.ui.toasts.filter((t) => t.id !== id);
     notifyStore();
   }, 2800);
+  timer?.unref?.();
 }
 
 export function dismissToast(id) {
@@ -286,7 +384,7 @@ export function dismissToast(id) {
   notifyStore();
 }
 
-/** Применяет выбранную тему и кастомные цвета к CSS-переменным документа */
+/** Применяет выбранную тему, цвета, шрифт, плотность и анимации к CSS-переменным документа */
 export function applyThemeToDom() {
   if (typeof document === 'undefined' || !document.documentElement) return;
   const t = store.theme;
@@ -294,10 +392,20 @@ export function applyThemeToDom() {
   const isCustom = t.preset === 'custom';
   const accent = isCustom ? (t.customAccent || '#6d7cff') : base.accent;
   const bg0 = isCustom ? (t.customBg0 || '#0b0d14') : base.bg0;
-  const bg1 = isCustom ? '#111420' : base.bg1;
-  const bg2 = isCustom ? '#181d2d' : base.bg2;
-  const bg3 = isCustom ? '#20263b' : base.bg3;
+  const bg1 = isCustom ? liftHex(bg0, 8) : base.bg1;
+  const bg2 = isCustom ? liftHex(bg0, 16) : base.bg2;
+  const bg3 = isCustom ? liftHex(bg0, 26) : base.bg3;
   const bubbleOut = t.customBubble || (isCustom ? hexToRgba(accent, 0.28) : base.bubbleOut);
+
+  const fontStack =
+    t.fontFamily === 'mono'
+      ? "ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace"
+      : t.fontFamily === 'inter'
+        ? "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+        : "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+
+  const avatarRad =
+    t.avatarShape === 'circle' ? '50%' : t.avatarShape === 'rounded' ? '18%' : '28%';
 
   const root = document.documentElement.style;
   root.setProperty('--bg-0', bg0);
@@ -309,9 +417,58 @@ export function applyThemeToDom() {
   root.setProperty('--accent-soft', hexToRgba(accent, 0.16));
   root.setProperty('--accent-glow', hexToRgba(accent, 0.34));
   root.setProperty('--bubble-out', bubbleOut);
-  root.setProperty('--avatar-radius', t.avatarShape === 'circle' ? '50%' : '28%');
+  root.setProperty('--avatar-radius', avatarRad);
   root.setProperty('--bubble-radius', `${Number(t.bubbleRadius) || 16}px`);
-  document.documentElement.dataset.backdrop = t.chatBackdrop || 'dots';
+  root.setProperty('--msg-font-size', `${Number(t.fontScale) || 14}px`);
+  root.setProperty('--font-ui', fontStack);
+
+  const ds = document.documentElement.dataset;
+  ds.backdrop = t.chatBackdrop || 'dots';
+  ds.density = t.density || 'normal';
+  ds.motion = t.animations === false ? 'reduced' : 'full';
+  ds.tails = t.messageTail === false ? 'off' : 'on';
+
+  const metaTheme = document.querySelector?.('meta[name="theme-color"]');
+  if (metaTheme) metaTheme.setAttribute('content', bg0);
+  if (globalThis.MeshChatAndroid?.setSystemBarColor) {
+    try { globalThis.MeshChatAndroid.setSystemBarColor(bg0); } catch { /* ignore */ }
+  }
+}
+
+export function triggerHaptic(kind = 'tap') {
+  const mode = store.settings.haptics || 'soft';
+  if (mode === 'off') return;
+  const ms = mode === 'strong' ? (kind === 'heavy' ? 36 : 24) : (kind === 'heavy' ? 20 : 11);
+  try {
+    if (globalThis.MeshChatAndroid?.vibrate) {
+      globalThis.MeshChatAndroid.vibrate(ms);
+      return;
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+      navigator.vibrate(ms);
+    }
+  } catch { /* ignore */ }
+}
+
+let clipboardClearTimer = null;
+
+export function copyWithPrivacy(text, toastMessage = 'Скопировано в буфер обмена') {
+  if (!text) return;
+  triggerHaptic('tap');
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(String(text)).catch(() => {});
+  }
+  const clearSec = Number(store.settings.clipboardAutoClearSec) || 0;
+  if (clearSec > 0) {
+    clearTimeout(clipboardClearTimer);
+    clipboardClearTimer = setTimeout(() => {
+      navigator.clipboard?.writeText('').catch(() => {});
+    }, clearSec * 1000);
+    clipboardClearTimer?.unref?.();
+    showToast(`${toastMessage} · очистка через ${clearSec} с`);
+  } else {
+    showToast(toastMessage);
+  }
 }
 
 function recordRttSample(ms) {
@@ -400,6 +557,7 @@ function syncAndroidNativeBridge() {
       if (info.packageName) store.android.packageName = info.packageName;
       store.android.legacyInstalled = Boolean(info.legacyInstalled);
       store.android.screenshotProtection = Boolean(info.screenshotProtection);
+      store.android.keepScreenOn = Boolean(info.keepScreenOn);
       if (info.bridgePort) {
         store.settings.localBridgeUrl = `ws://127.0.0.1:${info.bridgePort}`;
       }
@@ -442,7 +600,31 @@ export function toggleScreenshotProtection() {
   }
 }
 
+export function toggleKeepScreenOn() {
+  if (!globalThis.MeshChatAndroid?.setKeepScreenOn) {
+    showToast('Удержание подсветки экрана FLAG_KEEP_SCREEN_ON доступно в Android APK');
+    return;
+  }
+  try {
+    const next = !store.android.keepScreenOn;
+    const applied = Boolean(globalThis.MeshChatAndroid.setKeepScreenOn(next));
+    store.android.keepScreenOn = applied;
+    triggerHaptic('tap');
+    showToast(
+      applied
+        ? 'Экран будет оставаться включённым во время работы приложения'
+        : 'Стандартный таймер сна экрана восстановлен'
+    );
+    notifyStore();
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
+}
+
 export function handleBackNavigation() {
+  if (store.ui.pinLocked) {
+    return true;
+  }
   if (store.ui.bossActive) {
     toggleBossMode(false);
     return true;
@@ -591,6 +773,53 @@ function ensureSystemMessages(messagesObj, username = '') {
   return next;
 }
 
+let lastUserActivityAt = Date.now();
+let autoLockTimer = null;
+
+function restartSyncLoop() {
+  clearInterval(syncLoopTimer);
+  const sec = Math.max(2, Number(store.settings.syncIntervalSec) || 6);
+  syncLoopTimer = setInterval(() => {
+    if (!store.me) return;
+    if (!activeTransport?.isConnected) {
+      connectActiveTransport().catch(() => {});
+      return;
+    }
+    if (!store.sessionAuthenticated) {
+      authenticateAndSyncTransport().catch(() => {});
+      return;
+    }
+    syncMailbox().catch(() => {});
+    if (store.outbox.length > 0) flushOutbox().catch(() => {});
+  }, sec * 1000);
+  syncLoopTimer?.unref?.();
+}
+
+function startAutoLockWatchdog() {
+  if (typeof window === 'undefined') return;
+  const markActive = () => { lastUserActivityAt = Date.now(); };
+  window.addEventListener?.('pointerdown', markActive, { passive: true });
+  window.addEventListener?.('keydown', markActive, { passive: true });
+
+  clearInterval(autoLockTimer);
+  autoLockTimer = setInterval(() => {
+    const mins = Number(store.settings.autoLockMinutes) || 0;
+    if (!mins || !store.me) return;
+    if (Date.now() - lastUserActivityAt >= mins * 60_000) {
+      lastUserActivityAt = Date.now();
+      if (store.settings.pinHashB64) {
+        if (!store.ui.pinLocked) {
+          store.ui.pinLocked = true;
+          if (store.settings.strictBossWipe) cryptoWorker.call('lockRamCache').catch(() => {});
+          notifyStore();
+        }
+      } else if (!store.ui.bossActive) {
+        toggleBossMode(true);
+      }
+    }
+  }, 5000);
+}
+
 export async function bootClientApp() {
   try {
     await clientDb.open();
@@ -604,6 +833,10 @@ export async function bootClientApp() {
     if (savedSettings) Object.assign(store.settings, savedSettings);
     if (savedTheme) Object.assign(store.theme, savedTheme);
     if (savedProfile) Object.assign(store.profile, savedProfile);
+
+    await cryptoWorker.call('setCryptoConfig', {
+      paddingBlockBytes: Number(store.settings.paddingBlockBytes) || 512,
+    }).catch(() => {});
 
     applyThemeToDom();
     syncAndroidNativeBridge();
@@ -666,6 +899,9 @@ export async function bootClientApp() {
       }
 
       store.me = me;
+      if (store.settings.pinHashB64) {
+        store.ui.pinLocked = true;
+      }
       if (!store.profile.displayName) {
         store.profile.displayName = me.username;
       }
@@ -688,20 +924,8 @@ export async function bootClientApp() {
   }
 
   setInterval(purgeExpiredMessagesTick, 1000);
-  clearInterval(syncLoopTimer);
-  syncLoopTimer = setInterval(() => {
-    if (!store.me) return;
-    if (!activeTransport?.isConnected) {
-      connectActiveTransport().catch(() => {});
-      return;
-    }
-    if (!store.sessionAuthenticated) {
-      authenticateAndSyncTransport().catch(() => {});
-      return;
-    }
-    syncMailbox().catch(() => {});
-    if (store.outbox.length > 0) flushOutbox().catch(() => {});
-  }, 6000);
+  restartSyncLoop();
+  startAutoLockWatchdog();
 
   if (typeof window !== 'undefined') {
     const onWakeUp = () => {
@@ -1017,14 +1241,19 @@ export async function connectActiveTransport(pendingBundleUpload = null) {
           onionUrl: store.settings.onionUrl,
           i2pUrl: store.settings.i2pUrl,
           localBridgeUrl: store.settings.localBridgeUrl,
-          coverTrafficIntervalMs: store.settings.coverTraffic ? 25000 : 0,
+          iceTransportPolicy: store.settings.webrtcIcePolicy || 'all',
+          coverTrafficIntervalMs: store.settings.coverTraffic
+            ? Math.max(5, Number(store.settings.coverIntervalSec) || 25) * 1000
+            : 0,
           getIceServers: async () => {
-            if (!rpcChannel) return [];
+            const customStun = (store.settings.customStunUrl || '').trim();
+            const fallbackStun = customStun ? [{ urls: customStun }] : [];
+            if (!rpcChannel) return fallbackStun;
             try {
               const { data } = await rpcChannel.request('turn.credentials', {});
-              return data.iceServers || [];
+              return [...(data.iceServers || []), ...fallbackStun];
             } catch {
-              return [];
+              return fallbackStun;
             }
           },
           sendSignal: async (peerId, signalObject) => {
@@ -1164,6 +1393,19 @@ async function syncMailbox() {
 }
 
 function buildCompactProfileCard() {
+  if (store.settings.shareProfileE2ee === false) {
+    return {
+      displayName: (store.me?.username || '').slice(0, 40),
+      statusText: '',
+      bio: '',
+      badge: 'none',
+      avatarDataUrl: '',
+      bannerPreset: 'amoled',
+      bannerCustomColor: '#1b2242',
+      particles: 'none',
+      updatedAt: Date.now(),
+    };
+  }
   const p = store.profile;
   return {
     displayName: (p.displayName || store.me?.username || '').slice(0, 40),
@@ -1229,7 +1471,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
       verified: false,
       pinned: false,
       muted: false,
-      ttlSec: payload.ttlSec || 0,
+      ttlSec: payload.ttlSec || Number(store.settings.defaultTtlSec) || 0,
       unread: 0,
       lastPreview: '',
       lastTs: Date.now(),
@@ -1296,8 +1538,26 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   if (store.ui.activeChatId !== chatId) {
     chat.unread = (chat.unread || 0) + 1;
   }
-  if (store.settings.sound && !chat.muted && !store.ui.bossActive) {
-    playSfx('incoming');
+  if (!chat.muted && !store.ui.bossActive && !store.ui.pinLocked) {
+    if (store.settings.sound !== false) {
+      playSfx('incoming', store.settings.soundProfile || 'crystal');
+    }
+    triggerHaptic('heavy');
+  }
+
+  // Автоматическая предрасшифровка входящих изображений по политике медиа
+  if (
+    msg.media &&
+    !msg.media.once &&
+    msg.media.mime?.startsWith('image/') &&
+    store.settings.autoDecryptMedia !== 'manual'
+  ) {
+    const withinLimit =
+      store.settings.autoDecryptMedia === 'always' ||
+      (Number(msg.media.size) || 0) <= 1048576;
+    if (withinLimit) {
+      openEncryptedMedia(msg).catch(() => {});
+    }
   }
 
   await persistChatsAndMessages();
@@ -1306,6 +1566,12 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
 
 async function processIncomingAsk(askItem, { skipImmediateAck = false } = {}) {
   try {
+    if (store.settings.acceptAnonGateway === false) {
+      if (!skipImmediateAck && rpcChannel) {
+        rpcChannel.request('mailbox.ack', { ids: [], askIds: [askItem.id] }).catch(() => {});
+      }
+      return;
+    }
     const text = await cryptoWorker.call('decryptAsk', { payloadB64: askItem.payloadB64 });
     store.meshStats.packetsReceived += 1;
     if (!skipImmediateAck && rpcChannel) {
@@ -1331,7 +1597,9 @@ async function processIncomingAsk(askItem, { skipImmediateAck = false } = {}) {
     chat.lastPreview = text.slice(0, 80);
     chat.lastTs = Date.now();
     if (store.ui.activeChatId !== chatId) chat.unread = (chat.unread || 0) + 1;
-    if (store.settings.sound && !store.ui.bossActive) playSfx('incoming');
+    if (store.settings.sound !== false && !store.ui.bossActive && !store.ui.pinLocked) {
+      playSfx('incoming', store.settings.soundProfile || 'crystal');
+    }
     await persistChatsAndMessages();
     notifyStore();
   } catch (err) {
@@ -1519,7 +1787,17 @@ export async function updateMyProfile(patch) {
 export async function updateThemeSettings(patch) {
   Object.assign(store.theme, patch);
   applyThemeToDom();
+  triggerHaptic('tap');
   await clientDb.set('theme', store.theme);
+  notifyStore();
+}
+
+export async function resetThemeSettings() {
+  store.theme = { ...DEFAULT_THEME };
+  applyThemeToDom();
+  triggerHaptic('tap');
+  await clientDb.set('theme', store.theme);
+  showToast('Тема оформления возвращена к стандартной');
   notifyStore();
 }
 
@@ -1632,7 +1910,7 @@ export async function startChatWithUsername(query) {
     verified: Boolean(existing?.verified),
     pinned: Boolean(existing?.pinned),
     muted: Boolean(existing?.muted),
-    ttlSec: existing?.ttlSec || 0,
+    ttlSec: existing?.ttlSec !== undefined ? existing.ttlSec : (Number(store.settings.defaultTtlSec) || 0),
     unread: existing?.unread || 0,
     lastPreview: existing?.lastPreview || 'Канал E2E готов · Double Ratchet',
     lastTs: Date.now(),
@@ -1735,7 +2013,10 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     list.push(echoReply);
     chat.lastPreview = `Эхо OK (${res.elapsedMs} мс): ${trimmed.slice(0, 60)}`;
     chat.lastTs = echoReply.ts;
-    if (store.settings.sound) playSfx('sent');
+    if (store.settings.sound !== false && store.settings.outgoingSound !== false) {
+      playSfx('sent', store.settings.soundProfile || 'crystal');
+    }
+    triggerHaptic('tap');
     await persistChatsAndMessages();
     notifyStore();
     return;
@@ -1826,7 +2107,10 @@ async function deliverPayloadToPeer(chat, wirePayload, localMsg = null) {
 
     if (localMsg) {
       localMsg.status = 'sent';
-      if (store.settings.sound) playSfx('sent');
+      if (store.settings.sound !== false && store.settings.outgoingSound !== false) {
+        playSfx('sent', store.settings.soundProfile || 'crystal');
+      }
+      triggerHaptic('tap');
     }
   } catch {
     if (localMsg) localMsg.status = 'queued';
@@ -2109,6 +2393,8 @@ export async function rotateBlindMailbox() {
 
 export async function updateClientSettings(patch) {
   Object.assign(store.settings, patch);
+  triggerHaptic('tap');
+
   if (patch.serverUrl !== undefined) {
     const raw = (patch.serverUrl || '').trim().replace(/\/+$/, '');
     if (raw.includes('.onion')) {
@@ -2118,17 +2404,300 @@ export async function updateClientSettings(patch) {
     }
     syncAndroidNativeBridge();
   }
+
+  if (patch.paddingBlockBytes !== undefined) {
+    await cryptoWorker.call('setCryptoConfig', {
+      paddingBlockBytes: Number(store.settings.paddingBlockBytes) || 512,
+    }).catch(() => {});
+  }
+
+  if (patch.syncIntervalSec !== undefined) {
+    restartSyncLoop();
+  }
+
   await clientDb.set('settings', store.settings);
   notifyStore();
+
   if (
     patch.serverUrl !== undefined ||
     patch.transportPolicy !== undefined ||
     patch.onionUrl !== undefined ||
     patch.i2pUrl !== undefined ||
-    patch.coverTraffic !== undefined
+    patch.coverTraffic !== undefined ||
+    patch.coverIntervalSec !== undefined ||
+    patch.webrtcIcePolicy !== undefined ||
+    patch.customStunUrl !== undefined
   ) {
     if (store.me) await connectActiveTransport();
   }
+}
+
+// ─────────────── Локальный PIN-код, Память и Зашифрованный Резерв (AES-256-GCM) ───────────────
+
+async function computePinHashB64(pinStr, saltB64) {
+  const digest = await sha256(utf8ToBytes(`MESHCHAT-PIN-v1:${saltB64}:${String(pinStr).trim()}`));
+  return toBase64Url(digest);
+}
+
+export async function setAppPin(newPin) {
+  const clean = String(newPin || '').trim();
+  if (!/^\d{4,8}$/.test(clean)) {
+    throw new Error('PIN-код должен содержать от 4 до 8 цифр');
+  }
+  const saltB64 = toBase64Url(randomBytes(16));
+  const hashB64 = await computePinHashB64(clean, saltB64);
+  store.settings.pinSaltB64 = saltB64;
+  store.settings.pinHashB64 = hashB64;
+  store.ui.pinLocked = false;
+  await clientDb.set('settings', store.settings);
+  triggerHaptic('heavy');
+  showToast('PIN-блокировка интерфейса включена');
+  notifyStore();
+}
+
+export async function disableAppPin(currentPin = '') {
+  if (store.settings.pinHashB64) {
+    const check = await computePinHashB64(currentPin, store.settings.pinSaltB64);
+    if (check !== store.settings.pinHashB64) {
+      throw new Error('Неверный текущий PIN-код');
+    }
+  }
+  store.settings.pinHashB64 = '';
+  store.settings.pinSaltB64 = '';
+  store.ui.pinLocked = false;
+  await clientDb.set('settings', store.settings);
+  triggerHaptic('tap');
+  showToast('PIN-блокировка интерфейса отключена');
+  notifyStore();
+}
+
+export async function unlockWithPin(pin) {
+  if (!store.settings.pinHashB64) {
+    store.ui.pinLocked = false;
+    notifyStore();
+    return true;
+  }
+  const check = await computePinHashB64(pin, store.settings.pinSaltB64);
+  if (check === store.settings.pinHashB64) {
+    store.ui.pinLocked = false;
+    lastUserActivityAt = Date.now();
+    triggerHaptic('tap');
+    notifyStore();
+    return true;
+  }
+  triggerHaptic('heavy');
+  return false;
+}
+
+export function lockAppNow() {
+  if (store.settings.pinHashB64) {
+    store.ui.pinLocked = true;
+    if (store.settings.strictBossWipe) {
+      cryptoWorker.call('lockRamCache').catch(() => {});
+    }
+    triggerHaptic('tap');
+    notifyStore();
+    return;
+  }
+  toggleBossMode(true);
+}
+
+async function deriveBackupAesKey(passphrase, saltBytes) {
+  const baseKey = await globalThis.crypto.subtle.importKey(
+    'raw',
+    utf8ToBytes(passphrase),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+  const bits = await globalThis.crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 210_000, hash: 'SHA-256' },
+    baseKey,
+    256
+  );
+  return new Uint8Array(bits);
+}
+
+export async function exportEncryptedBackup(passphrase) {
+  const pwd = String(passphrase || '');
+  if (pwd.length < 6) {
+    throw new Error('Укажите парольную фразу резервной копии не короче 6 символов');
+  }
+  const snapshot = {
+    schema: 'meshchat-encrypted-backup-v1',
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    username: store.me?.username || '',
+    profile: store.profile,
+    theme: store.theme,
+    settings: {
+      ...store.settings,
+      pinHashB64: '',
+      pinSaltB64: '',
+    },
+    chats: store.chats,
+    messages: store.messages,
+  };
+
+  const salt = randomBytes(16);
+  const iv = randomBytes(12);
+  const key = await deriveBackupAesKey(pwd, salt);
+  const plainBytes = utf8ToBytes(JSON.stringify(snapshot));
+  const aad = utf8ToBytes('MESHCHAT-BACKUP-AAD-v1');
+  const ct = await aesGcmEncrypt(key, iv, plainBytes, aad);
+  key.fill(0);
+
+  const envelope = {
+    format: 'meshchat-vault-v1',
+    kdf: 'PBKDF2-SHA256-210000',
+    cipher: 'AES-256-GCM',
+    saltB64: toBase64Url(salt),
+    ivB64: toBase64Url(iv),
+    ctB64: toBase64Url(ct),
+  };
+
+  const jsonStr = JSON.stringify(envelope, null, 2);
+  if (typeof document !== 'undefined') {
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `meshchat-${store.me?.username || 'vault'}-${new Date().toISOString().slice(0, 10)}.enc.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
+  showToast('Зашифрованный архив AES-256-GCM сформирован');
+  return envelope;
+}
+
+export async function importEncryptedBackup(jsonTextOrObj, passphrase) {
+  const pwd = String(passphrase || '');
+  if (pwd.length < 6) {
+    throw new Error('Введите парольную фразу архива (минимум 6 символов)');
+  }
+  const env = typeof jsonTextOrObj === 'string' ? JSON.parse(jsonTextOrObj) : jsonTextOrObj;
+  if (!env || env.format !== 'meshchat-vault-v1' || !env.saltB64 || !env.ivB64 || !env.ctB64) {
+    throw new Error('Неподдерживаемый или повреждённый формат резервного файла');
+  }
+  const salt = fromBase64Url(env.saltB64);
+  const iv = fromBase64Url(env.ivB64);
+  const ct = fromBase64Url(env.ctB64);
+  const key = await deriveBackupAesKey(pwd, salt);
+
+  let plainBytes;
+  try {
+    plainBytes = await aesGcmDecrypt(key, iv, ct, utf8ToBytes('MESHCHAT-BACKUP-AAD-v1'));
+  } catch {
+    throw new Error('Неверная парольная фраза или нарушена целостность архива AES-256-GCM');
+  } finally {
+    key.fill(0);
+  }
+
+  const snap = JSON.parse(bytesToUtf8(plainBytes));
+  if (snap.profile && typeof snap.profile === 'object') {
+    Object.assign(store.profile, snap.profile);
+    await clientDb.set('profile', store.profile);
+  }
+  if (snap.theme && typeof snap.theme === 'object') {
+    Object.assign(store.theme, snap.theme);
+    applyThemeToDom();
+    await clientDb.set('theme', store.theme);
+  }
+  if (snap.settings && typeof snap.settings === 'object') {
+    const keepPinHash = store.settings.pinHashB64;
+    const keepPinSalt = store.settings.pinSaltB64;
+    Object.assign(store.settings, snap.settings, {
+      pinHashB64: keepPinHash,
+      pinSaltB64: keepPinSalt,
+    });
+    await clientDb.set('settings', store.settings);
+  }
+  if (snap.chats && typeof snap.chats === 'object') {
+    store.chats = ensureSystemChats({ ...snap.chats, ...store.chats }, store.me?.username || '');
+  }
+  if (snap.messages && typeof snap.messages === 'object') {
+    for (const [cid, arr] of Object.entries(snap.messages)) {
+      if (!Array.isArray(arr)) continue;
+      const cur = store.messages[cid] || [];
+      const seen = new Set(cur.map((m) => m.id));
+      store.messages[cid] = [...cur, ...arr.filter((m) => m && !seen.has(m.id))].sort(
+        (a, b) => (a.ts || 0) - (b.ts || 0)
+      );
+    }
+  }
+  await persistChatsAndMessages();
+  restartSyncLoop();
+  notifyStore();
+  showToast('Резервная копия расшифрована и восстановлена');
+  return snap;
+}
+
+export function clearDecryptedMediaCache() {
+  let count = 0;
+  for (const [blobId, url] of Object.entries(store.decryptedMediaUrls)) {
+    try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+    delete store.decryptedMediaUrls[blobId];
+    count += 1;
+  }
+  triggerHaptic('tap');
+  showToast(count > 0 ? `Освобождено объектов медиа из ОЗУ: ${count}` : 'Кеш расшифрованных медиа уже пуст');
+  notifyStore();
+}
+
+export async function clearAllMessagesHistory() {
+  for (const cid of Object.keys(store.messages)) {
+    store.messages[cid] = [];
+  }
+  store.messages = ensureSystemMessages({}, store.me?.username || '');
+  for (const chat of Object.values(store.chats)) {
+    chat.unread = 0;
+    if (chat.kind === 'dm') {
+      chat.lastPreview = 'История очищена локально · E2EE активно';
+    }
+  }
+  clearDecryptedMediaCache();
+  await persistChatsAndMessages();
+  showToast('Локальная история переписки очищена (ключи и контакты сохранены)');
+  notifyStore();
+}
+
+export async function resetAllSettingsToDefaults() {
+  const keepServer = store.settings.serverUrl;
+  store.settings = { ...DEFAULT_SETTINGS, serverUrl: keepServer };
+  store.theme = { ...DEFAULT_THEME };
+  store.ui.pinLocked = false;
+  applyThemeToDom();
+  restartSyncLoop();
+  await cryptoWorker.call('setCryptoConfig', { paddingBlockBytes: 512 }).catch(() => {});
+  await Promise.all([
+    clientDb.set('settings', store.settings),
+    clientDb.set('theme', store.theme),
+  ]);
+  showToast('Все настройки интерфейса и клиента сброшены к стандартным');
+  notifyStore();
+}
+
+export function getStorageStats() {
+  const chatList = Object.values(store.chats);
+  const dmCount = chatList.filter((c) => c.kind === 'dm').length;
+  let msgCount = 0;
+  for (const arr of Object.values(store.messages)) {
+    msgCount += Array.isArray(arr) ? arr.length : 0;
+  }
+  const mediaCached = Object.keys(store.decryptedMediaUrls).length;
+  const approxBytes =
+    utf8ToBytes(JSON.stringify(store.chats)).byteLength +
+    utf8ToBytes(JSON.stringify(store.messages)).byteLength +
+    utf8ToBytes(JSON.stringify(store.profile)).byteLength;
+
+  return {
+    chatsTotal: chatList.length,
+    dmCount,
+    msgCount,
+    mediaCached,
+    outboxCount: store.outbox.length,
+    approxBytes,
+  };
 }
 
 export function toggleBossMode(forceValue) {

@@ -1,13 +1,14 @@
-// Главный экран Android-приложения MeshChat v1.5.
+// Главный экран Android-приложения MeshChat v1.6.
 // Запускает изолированный SOCKS5-мост (127.0.0.1:27700) и собственный локальный узел (127.0.0.1:27701),
 // сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault),
-// управляет защитой от скриншотов (по умолчанию ВЫКЛ — скриншоты разрешены, переключается в Настройках)
-// и делегирует системную кнопку/жест «Назад» в SPA-навигацию интерфейса.
+// управляет защитой от скриншотов FLAG_SECURE (по умолчанию ВЫКЛ), удержанием экрана, цветом системных баров,
+// тактильной вибрацией и системным жестом «Назад».
 
 package org.meshchat.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
@@ -15,6 +16,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -37,6 +40,7 @@ public final class MainActivity extends Activity {
     private static final String LEGACY_PACKAGE = "org.meshchat.app";
     private static final String META_PREFS = "meshchat_meta";
     private static final String KEY_SCREENSHOT_PROTECTION = "screenshot_protection";
+    private static final String KEY_KEEP_SCREEN_ON = "keep_screen_on";
 
     private WebView webView;
     private MeshSocksBridge socksBridge;
@@ -51,12 +55,13 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         SharedPreferences prefs = getSharedPreferences(META_PREFS, MODE_PRIVATE);
-        // Скриншоты по умолчанию разрешены (false); пользователь может включить FLAG_SECURE в Настройках
         boolean secureScreen = prefs.getBoolean(KEY_SCREENSHOT_PROTECTION, false);
+        boolean keepAwake = prefs.getBoolean(KEY_KEEP_SCREEN_ON, false);
 
         Window window = getWindow();
         if (window != null) {
             applyWindowSecureFlag(secureScreen);
+            applyKeepScreenOnFlag(keepAwake);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(Color.parseColor("#0b0d14"));
             window.setNavigationBarColor(Color.parseColor("#0b0d14"));
@@ -106,8 +111,22 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void applyKeepScreenOnFlag(boolean enabled) {
+        Window window = getWindow();
+        if (window == null) return;
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+    }
+
     private boolean isScreenshotProtectionActive() {
         return getSharedPreferences(META_PREFS, MODE_PRIVATE).getBoolean(KEY_SCREENSHOT_PROTECTION, false);
+    }
+
+    private boolean isKeepScreenOnActive() {
+        return getSharedPreferences(META_PREFS, MODE_PRIVATE).getBoolean(KEY_KEEP_SCREEN_ON, false);
     }
 
     private int getCurrentVersionCode() {
@@ -115,7 +134,7 @@ public final class MainActivity extends Activity {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             return pi.versionCode;
         } catch (Exception e) {
-            return 6;
+            return 7;
         }
     }
 
@@ -269,7 +288,7 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами, автообновлением, FLAG_SECURE и AndroidKeyStore */
+    /** Нативный мост управления узлами, автообновлением, флагами окна, вибрацией и AndroidKeyStore */
     public final class AndroidJsBridge {
         @JavascriptInterface
         public String getAppInfoJson() {
@@ -283,9 +302,10 @@ public final class MainActivity extends Activity {
                 o.put("bridgePort", socksBridge != null ? socksBridge.getBoundPort() : MeshSocksBridge.BRIDGE_PORT);
                 o.put("legacyInstalled", isLegacyPackageInstalled());
                 o.put("screenshotProtection", isScreenshotProtectionActive());
+                o.put("keepScreenOn", isKeepScreenOnActive());
                 return o.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false,\"screenshotProtection\":false}";
+                return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false,\"screenshotProtection\":false,\"keepScreenOn\":false}";
             }
         }
 
@@ -302,6 +322,47 @@ public final class MainActivity extends Activity {
                     .apply();
             runOnUiThread(() -> applyWindowSecureFlag(enabled));
             return enabled;
+        }
+
+        @JavascriptInterface
+        public boolean setKeepScreenOn(boolean enabled) {
+            getSharedPreferences(META_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_KEEP_SCREEN_ON, enabled)
+                    .apply();
+            runOnUiThread(() -> applyKeepScreenOnFlag(enabled));
+            return enabled;
+        }
+
+        @JavascriptInterface
+        public void setSystemBarColor(String hexColor) {
+            if (hexColor == null || hexColor.isEmpty()) return;
+            runOnUiThread(() -> {
+                try {
+                    int color = Color.parseColor(hexColor);
+                    Window w = getWindow();
+                    if (w != null) {
+                        w.setStatusBarColor(color);
+                        w.setNavigationBarColor(color);
+                    }
+                    if (webView != null) {
+                        webView.setBackgroundColor(color);
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void vibrate(int durationMs) {
+            int clamped = Math.max(5, Math.min(durationMs, 150));
+            try {
+                Vibrator vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+                if (vib != null && vib.hasVibrator()) {
+                    vib.vibrate(VibrationEffect.createOneShot(clamped, VibrationEffect.DEFAULT_AMPLITUDE));
+                }
+            } catch (Exception ignored) {
+            }
         }
 
         @JavascriptInterface

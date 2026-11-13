@@ -6,24 +6,15 @@ import {
   store,
   APP_VERSION,
   APP_VERSION_CODE,
-  THEME_PRESETS,
   BANNER_PRESETS,
-  DEFAULT_CLOUD_URL,
   updateMyProfile,
-  updateThemeSettings,
-  updateClientSettings,
-  toggleScreenshotProtection,
-  toggleAndroidLanMesh,
   checkForUpdates,
   applyAppUpdate,
-  rotateBlindMailbox,
-  logoutAndWipeDevice,
   startChatWithUsername,
   selectChat,
+  copyWithPrivacy,
   showToast,
-  notifyStore,
 } from '../store/app-store.mjs';
-import { TRANSPORT_POLICY } from '../transport/transport-interface.mjs';
 import {
   Icon,
   AvatarBox,
@@ -31,6 +22,9 @@ import {
   AmbientParticles,
   compressAvatarImageFile,
 } from './boss-screen.mjs';
+import { ThemeStudioCard, SettingsScreen } from './settings-screen.mjs';
+
+export { ThemeStudioCard, SettingsScreen };
 
 const BADGE_OPTIONS = [
   { id: 'verified', label: 'Щит E2E' },
@@ -104,15 +98,13 @@ export function ProfileView() {
   };
 
   const copyUsername = () => {
-    navigator.clipboard?.writeText(`@${me?.username || ''}`).catch(() => {});
-    showToast(`Скопировано: @${me?.username}`);
+    copyWithPrivacy(`@${me?.username || ''}`, `Скопировано: @${me?.username}`);
   };
 
   const copyAskUrl = () => {
     const base = store.settings.serverUrl ? store.settings.serverUrl.replace(/\/+$/, '') : location.origin;
     const url = `${base}/q/${me?.username}`;
-    navigator.clipboard?.writeText(url).catch(() => {});
-    showToast(`Ссылка шлюза скопирована: ${url}`);
+    copyWithPrivacy(url, `Ссылка шлюза скопирована: ${url}`);
   };
 
   return html`<section class="tab-screen profile-screen">
@@ -341,96 +333,6 @@ export function ProfileView() {
   </section>`;
 }
 
-// ─────────────────────── Студия кастомных тем и цветов приложения ───────────────────────
-
-export function ThemeStudioCard({ onClose = null }) {
-  const { theme } = store;
-
-  return html`<div class="studio-card">
-    <div class="studio-card-head">
-      <h3>Кастомизация приложения и цветов</h3>
-      ${onClose && html`<button type="button" class="icon-btn small" onClick=${onClose}>
-        <${Icon} name="close" size=${15} />
-      </button>`}
-    </div>
-
-    <label class="field-label">Цветовая палитра интерфейса</label>
-    <div class="theme-presets-grid">
-      ${Object.values(THEME_PRESETS).map((p) => html`<button
-        key=${p.id}
-        type="button"
-        class=${`theme-preset-tile ${theme.preset === p.id ? 'active' : ''}`}
-        onClick=${() => updateThemeSettings({ preset: p.id, customAccent: p.accent })}
-      >
-        <span class="preset-preview" style=${`background:${p.bg0};border-color:${p.accent}`}>
-          <i style=${`background:${p.accent}`}></i>
-        </span>
-        <span>${p.label}</span>
-      </button>`)}
-    </div>
-
-    <div class="custom-color-row">
-      <div class="color-field-box">
-        <span class="field-label">Свой цвет акцента</span>
-        <label class="hex-color-control">
-          <input
-            type="color"
-            value=${theme.customAccent || '#6d7cff'}
-            onInput=${(e) => updateThemeSettings({ preset: 'custom', customAccent: e.target.value })}
-          />
-          <code>${(theme.customAccent || '#6d7cff').toUpperCase()}</code>
-        </label>
-      </div>
-
-      <div class="color-field-box">
-        <span class="field-label">Цвет моих сообщений</span>
-        <label class="hex-color-control">
-          <input
-            type="color"
-            value=${theme.customBubble || '#263159'}
-            onInput=${(e) => updateThemeSettings({ customBubble: e.target.value })}
-          />
-          <button
-            type="button"
-            class="link-btn"
-            onClick=${() => updateThemeSettings({ customBubble: '' })}
-          >Авто</button>
-        </label>
-      </div>
-    </div>
-
-    <label class="field-label">Форма аватаров</label>
-    <div class="chip-grid">
-      <button
-        type="button"
-        class=${`choice-chip ${theme.avatarShape === 'squircle' ? 'active' : ''}`}
-        onClick=${() => updateThemeSettings({ avatarShape: 'squircle' })}
-      >Сквиркл (Mesh)</button>
-      <button
-        type="button"
-        class=${`choice-chip ${theme.avatarShape === 'circle' ? 'active' : ''}`}
-        onClick=${() => updateThemeSettings({ avatarShape: 'circle' })}
-      >Круг (Классика)</button>
-    </div>
-
-    <label class="field-label">Скругление сообщений и узор фона чата</label>
-    <div class="chip-grid">
-      ${[[10, 'Строгое 10px'], [16, 'Стандарт 16px'], [22, 'Мягкое 22px']].map(([r, lbl]) => html`<button
-        key=${r}
-        type="button"
-        class=${`choice-chip ${Number(theme.bubbleRadius) === r ? 'active' : ''}`}
-        onClick=${() => updateThemeSettings({ bubbleRadius: r })}
-      >${lbl}</button>`)}
-      ${[['dots', 'Точки'], ['grid', 'Сетка'], ['none', 'Чистый OLED']].map(([bg, lbl]) => html`<button
-        key=${bg}
-        type="button"
-        class=${`choice-chip ${theme.chatBackdrop === bg ? 'active' : ''}`}
-        onClick=${() => updateThemeSettings({ chatBackdrop: bg })}
-      >${lbl}</button>`)}
-    </div>
-  </div>`;
-}
-
 // ─────────────────────── Вкладка «Контакты» ───────────────────────
 
 export function ContactsView() {
@@ -513,215 +415,6 @@ export function ContactsView() {
           </div>
           <${Icon} name="chat" size=${18} />
         </div>`)}
-      </div>
-    </div>
-  </section>`;
-}
-
-// ─────────────────────── Вкладка «Настройки» (полноэкранная студия) ───────────────────────
-
-const POLICY_LIST = [
-  [TRANSPORT_POLICY.AUTO, 'Автоматический мультитранспорт', 'WSS -> P2P WebRTC -> Tor -> I2P'],
-  [TRANSPORT_POLICY.TOR_ONLY, 'Только Tor (.onion) · Fail-Closed', 'Строгая блокировка прямых соединений'],
-  [TRANSPORT_POLICY.P2P_FIRST, 'Приоритет P2P WebRTC', 'Прямые каналы между пирами'],
-  [TRANSPORT_POLICY.DIRECT_ONLY, 'Прямой WSS ретранслятор', 'Минимальная задержка доставки'],
-];
-
-export function SettingsScreen() {
-  const { settings, update, android } = store;
-  const [serverUrl, setServerUrl] = useState(settings.serverUrl || '');
-  const [onionUrl, setOnionUrl] = useState(settings.onionUrl || '');
-
-  const onSaveNetwork = async () => {
-    await updateClientSettings({
-      serverUrl: serverUrl.trim(),
-      onionUrl: onionUrl.trim(),
-    });
-    showToast('Сетевая конфигурация сохранена');
-  };
-
-  return html`<section class="tab-screen settings-screen">
-    <header class="screen-hero-head">
-      <div>
-        <h1 class="screen-big-title">Настройки</h1>
-        <div class="screen-pills-row">
-          <span class="hero-status-pill online">v${APP_VERSION} · build ${APP_VERSION_CODE}</span>
-          <span class="hero-status-pill neutral">GitHub Auto-Update</span>
-        </div>
-      </div>
-    </header>
-
-    <div class="mesh-scroll-body">
-      <${ThemeStudioCard} />
-
-      <div class="studio-card">
-        <div class="studio-card-head">
-          <h3>Экран, скриншоты и приватность</h3>
-        </div>
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${toggleScreenshotProtection}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Защита от скриншотов (FLAG_SECURE)</div>
-              <div class="plugin-sub">
-                ${android.screenshotProtection
-                  ? 'Снимки и запись экрана заблокированы на уровне ОС Android'
-                  : 'Выключено по умолчанию — скриншоты разрешены'}
-              </div>
-            </div>
-            <button
-              type="button"
-              class=${`ios-switch ${android.screenshotProtection ? 'on' : ''}`}
-              aria-label="Переключить защиту от скриншотов"
-            ><span></span></button>
-          </div>
-
-          ${android.isApk && html`<div class="settings-switch-row" onClick=${toggleAndroidLanMesh}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Локальный узел Wi-Fi LAN</div>
-              <div class="plugin-sub">
-                ${android.lanMeshRunning && android.lanUrl
-                  ? `Активен ретранслятор ${android.lanUrl}`
-                  : 'Прямой обмен в локальной сети без интернета (:3000)'}
-              </div>
-            </div>
-            <button
-              type="button"
-              class=${`ios-switch ${android.lanMeshRunning ? 'on' : ''}`}
-              aria-label="Переключить локальный узел Wi-Fi LAN"
-            ><span></span></button>
-          </div>`}
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ coverTraffic: !settings.coverTraffic })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Маскирующий Cover-трафик (512 Б)</div>
-              <div class="plugin-sub">Фоновые шумовые пакеты против корреляции времени активности</div>
-            </div>
-            <button
-              type="button"
-              class=${`ios-switch ${settings.coverTraffic ? 'on' : ''}`}
-              aria-label="Переключить Cover-трафик"
-            ><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sound: settings.sound === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Звуковые сигналы уведомлений</div>
-              <div class="plugin-sub">Локальный синтез WebAudio без внешних аудиофайлов</div>
-            </div>
-            <button
-              type="button"
-              class=${`ios-switch ${settings.sound !== false ? 'on' : ''}`}
-              aria-label="Переключить звук"
-            ><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ strictBossWipe: !settings.strictBossWipe })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Очистка сессионных ключей ОЗУ при блокировке</div>
-              <div class="plugin-sub">Сброс расшифрованного кеша при включении экрана маскировки (Esc×2)</div>
-            </div>
-            <button
-              type="button"
-              class=${`ios-switch ${settings.strictBossWipe ? 'on' : ''}`}
-              aria-label="Переключить строгую очистку ОЗУ"
-            ><span></span></button>
-          </div>
-        </div>
-      </div>
-
-      <div class="studio-card">
-        <div class="studio-card-head">
-          <h3>Автообновление через GitHub Releases</h3>
-        </div>
-        <p class="modal-desc">
-          Пакет подписан постоянным сертификатом релиза (<code>io.meshchat.app</code>), поэтому новые версии
-          устанавливаются поверх текущей без конфликта пакетов и с полным сохранением аккаунта и переписки.
-        </p>
-        <div class="studio-actions">
-          <button
-            type="button"
-            class="btn-ghost compact"
-            disabled=${update.checking}
-            onClick=${() => checkForUpdates({ silent: false })}
-          >
-            <${Icon} name="refresh" size=${14} /> ${update.checking ? 'Проверка…' : 'Проверить релизы GitHub'}
-          </button>
-          <button type="button" class="btn-primary compact" onClick=${applyAppUpdate}>
-            <${Icon} name="download" size=${14} /> ${update.available ? `Установить v${update.remoteVersion}` : 'Переустановить с GitHub'}
-          </button>
-        </div>
-      </div>
-
-      <div class="studio-card">
-        <div class="studio-card-head">
-          <h3>Узел ретрансляции и политика маршрутизации</h3>
-        </div>
-        <div class="chip-grid" style="margin-bottom:10px">
-          <button
-            type="button"
-            class="choice-chip"
-            onClick=${() => { setServerUrl(DEFAULT_CLOUD_URL); updateClientSettings({ serverUrl: DEFAULT_CLOUD_URL }); }}
-          >Облачный узел EU</button>
-          <button
-            type="button"
-            class="choice-chip"
-            onClick=${() => { setServerUrl(''); updateClientSettings({ serverUrl: '' }); }}
-          >Локальный узел</button>
-        </div>
-
-        <label class="field-label">URL сервера ретрансляции</label>
-        <input
-          class="field-input"
-          type="text"
-          placeholder="https://meshchat-6a11.onrender.com"
-          value=${serverUrl}
-          onInput=${(e) => setServerUrl(e.target.value)}
-        />
-
-        <label class="field-label">Адрес скрытого сервиса Tor (.onion)</label>
-        <input
-          class="field-input"
-          type="text"
-          placeholder="ws://xxxx.onion/ws"
-          value=${onionUrl}
-          onInput=${(e) => setOnionUrl(e.target.value)}
-        />
-
-        <label class="field-label">Режим транспорта</label>
-        <div class="policy-stack">
-          ${POLICY_LIST.map(([id, title, sub]) => html`<label
-            key=${id}
-            class=${`policy-card ${settings.transportPolicy === id ? 'selected' : ''}`}
-            onClick=${() => updateClientSettings({ transportPolicy: id })}
-          >
-            <div>
-              <div class="policy-title">${title}</div>
-              <div class="policy-desc">${sub}</div>
-            </div>
-          </label>`)}
-        </div>
-
-        <div class="studio-actions">
-          <button type="button" class="btn-ghost compact" onClick=${rotateBlindMailbox}>
-            Ротировать слепой ящик
-          </button>
-          <button type="button" class="btn-primary compact" onClick=${onSaveNetwork}>
-            Применить сеть
-          </button>
-        </div>
-      </div>
-
-      <div class="studio-card danger-zone">
-        <div class="studio-card-head">
-          <h3>Управление ключами устройства</h3>
-        </div>
-        <p class="modal-desc">
-          Сессия сохраняется навсегда между перезапусками и обновлениями APK. Кнопка ниже полностью уничтожает
-          локальные ключи и историю на этом устройстве.
-        </p>
-        <button type="button" class="btn-danger" onClick=${logoutAndWipeDevice}>
-          Завершить сеанс и стереть ключи на устройстве
-        </button>
       </div>
     </div>
   </section>`;
