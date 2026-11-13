@@ -6,16 +6,24 @@ import {
   notifyStore,
   setChatTtl,
   openSafetyVerificationModal,
+  openPeerProfileModal,
   openEncryptedMedia,
 } from '../store/app-store.mjs';
-import { Icon, TTL_CHOICES, ttlText } from './boss-screen.mjs';
+import {
+  Icon,
+  AvatarBox,
+  ProfileBadgeIcon,
+  TTL_CHOICES,
+  ttlText,
+} from './boss-screen.mjs';
 
 export function InspectorPanel() {
   const { chats, messages, decryptedMediaUrls, ui, activeTransportId, me } = store;
   const chat = ui.activeChatId ? chats[ui.activeChatId] : null;
   if (!chat || !ui.inspectorOpen) return null;
 
-  const initials = (chat.username || chat.title || '?').replace(/^@/, '').slice(0, 2).toUpperCase();
+  const displayTitle = chat.peerProfile?.displayName || chat.title;
+  const peerBadge = chat.peerProfile?.badge || (chat.verified ? 'verified' : 'none');
   const chatMsgs = messages[chat.id] || [];
   const mediaItems = chatMsgs.filter((m) => m.media && !m.media.once);
 
@@ -39,13 +47,28 @@ export function InspectorPanel() {
     ><${Icon} name="close" size=${15} /></button>
 
     <div class="inspector-profile">
-      <div class="avatar xl" style=${`background:${chat.avatarColor || '#1E3A5F'}`}>
-        ${chat.kind === 'ask' ? html`<${Icon} name="inbox" size=${30} />` : html`<span>${initials}</span>`}
-        <span class="profile-badge" title=${chat.verified ? 'Ключи верифицированы' : 'E2E активно'}>
-          <${Icon} name=${chat.verified ? 'shield' : 'lock'} size=${13} />
+      <div
+        class="inspector-avatar-wrap"
+        onClick=${() => chat.kind === 'dm' && openPeerProfileModal(chat.id)}
+      >
+        <${AvatarBox}
+          title=${displayTitle}
+          username=${chat.username}
+          avatarDataUrl=${chat.peerProfile?.avatarDataUrl || ''}
+          color=${chat.avatarColor || '#3B4CCA'}
+          kind=${chat.kind}
+          size=${72}
+        />
+        <span class="profile-badge" title=${chat.verified ? 'Ключи верифицированы' : 'E2EE активно'}>
+          <${Icon} name=${chat.verified || chat.kind !== 'dm' ? 'shield' : 'lock'} size=${12} />
         </span>
       </div>
-      <h3 class="inspector-name">${chat.title}</h3>
+
+      <h3 class="inspector-name">
+        <span>${displayTitle}</span>
+        <${ProfileBadgeIcon} badge=${peerBadge} size=${13} />
+      </h3>
+
       <button
         type="button"
         class="inspector-sublink"
@@ -53,9 +76,11 @@ export function InspectorPanel() {
       >
         ${chat.kind === 'ask'
           ? `Шлюз: /q/${me?.username}`
-          : chat.verified
-            ? 'Отпечаток безопасности подтверждён'
-            : 'Проверить криптоотпечаток (HEX / 60 цифр)'}
+          : chat.kind === 'echo'
+            ? 'Локальный сейф AES-256-GCM'
+            : chat.verified
+              ? 'Отпечаток безопасности подтверждён'
+              : 'Проверить криптоотпечаток (HEX / 60 цифр)'}
       </button>
 
       <div class="inspector-circle-row">

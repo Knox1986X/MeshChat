@@ -12,6 +12,8 @@ import {
   updateMyProfile,
   updateThemeSettings,
   updateClientSettings,
+  toggleScreenshotProtection,
+  toggleAndroidLanMesh,
   checkForUpdates,
   applyAppUpdate,
   rotateBlindMailbox,
@@ -66,6 +68,16 @@ export function ProfileView() {
   const [statusText, setStatusText] = useState(profile.statusText || '');
   const [bio, setBio] = useState(profile.bio || '');
   const fileRef = useRef(null);
+
+  const toggleEditForm = (forceVal) => {
+    const next = typeof forceVal === 'boolean' ? forceVal : !editOpen;
+    if (next) {
+      setDisplayName(store.profile.displayName || store.me?.username || '');
+      setStatusText(store.profile.statusText || '');
+      setBio(store.profile.bio || '');
+    }
+    setEditOpen(next);
+  };
 
   const onPickPhoto = async (e) => {
     const file = e.target.files?.[0];
@@ -162,7 +174,7 @@ export function ProfileView() {
             <${Icon} name="camera" size=${20} />
             <span>Выбрать фото</span>
           </button>
-          <button type="button" class="profile-tile-btn" onClick=${() => setEditOpen(!editOpen)}>
+          <button type="button" class="profile-tile-btn" onClick=${() => toggleEditForm()}>
             <${Icon} name="edit" size=${20} />
             <span>Изменить</span>
           </button>
@@ -275,7 +287,7 @@ export function ProfileView() {
           <${Icon} name="qr" size=${20} />
         </div>
 
-        <div class="profile-info-item" onClick=${() => setEditOpen(true)}>
+        <div class="profile-info-item" onClick=${() => toggleEditForm(true)}>
           <div class="info-item-main">
             <div class="info-item-val">${profile.bio || 'Сквозное шифрование Signal Protocol'}</div>
             <div class="info-item-lbl">О себе · синхронизируется по Double Ratchet</div>
@@ -463,7 +475,7 @@ export function ContactsView() {
         <input
           class="field-input"
           type="text"
-          placeholder="Добавить по @username (обмен ключами X3DH)…"
+          placeholder="@username собеседника…"
           value=${query}
           onInput=${(e) => setQuery(e.target.value)}
         />
@@ -516,7 +528,7 @@ const POLICY_LIST = [
 ];
 
 export function SettingsScreen() {
-  const { settings, update } = store;
+  const { settings, update, android } = store;
   const [serverUrl, setServerUrl] = useState(settings.serverUrl || '');
   const [onionUrl, setOnionUrl] = useState(settings.onionUrl || '');
 
@@ -541,6 +553,81 @@ export function SettingsScreen() {
 
     <div class="mesh-scroll-body">
       <${ThemeStudioCard} />
+
+      <div class="studio-card">
+        <div class="studio-card-head">
+          <h3>Экран, скриншоты и приватность</h3>
+        </div>
+        <div class="settings-rows-list">
+          <div class="settings-switch-row" onClick=${toggleScreenshotProtection}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Защита от скриншотов (FLAG_SECURE)</div>
+              <div class="plugin-sub">
+                ${android.screenshotProtection
+                  ? 'Снимки и запись экрана заблокированы на уровне ОС Android'
+                  : 'Выключено по умолчанию — скриншоты разрешены'}
+              </div>
+            </div>
+            <button
+              type="button"
+              class=${`ios-switch ${android.screenshotProtection ? 'on' : ''}`}
+              aria-label="Переключить защиту от скриншотов"
+            ><span></span></button>
+          </div>
+
+          ${android.isApk && html`<div class="settings-switch-row" onClick=${toggleAndroidLanMesh}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Локальный узел Wi-Fi LAN</div>
+              <div class="plugin-sub">
+                ${android.lanMeshRunning && android.lanUrl
+                  ? `Активен ретранслятор ${android.lanUrl}`
+                  : 'Прямой обмен в локальной сети без интернета (:3000)'}
+              </div>
+            </div>
+            <button
+              type="button"
+              class=${`ios-switch ${android.lanMeshRunning ? 'on' : ''}`}
+              aria-label="Переключить локальный узел Wi-Fi LAN"
+            ><span></span></button>
+          </div>`}
+
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ coverTraffic: !settings.coverTraffic })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Маскирующий Cover-трафик (512 Б)</div>
+              <div class="plugin-sub">Фоновые шумовые пакеты против корреляции времени активности</div>
+            </div>
+            <button
+              type="button"
+              class=${`ios-switch ${settings.coverTraffic ? 'on' : ''}`}
+              aria-label="Переключить Cover-трафик"
+            ><span></span></button>
+          </div>
+
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sound: settings.sound === false })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Звуковые сигналы уведомлений</div>
+              <div class="plugin-sub">Локальный синтез WebAudio без внешних аудиофайлов</div>
+            </div>
+            <button
+              type="button"
+              class=${`ios-switch ${settings.sound !== false ? 'on' : ''}`}
+              aria-label="Переключить звук"
+            ><span></span></button>
+          </div>
+
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ strictBossWipe: !settings.strictBossWipe })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Очистка сессионных ключей ОЗУ при блокировке</div>
+              <div class="plugin-sub">Сброс расшифрованного кеша при включении экрана маскировки (Esc×2)</div>
+            </div>
+            <button
+              type="button"
+              class=${`ios-switch ${settings.strictBossWipe ? 'on' : ''}`}
+              aria-label="Переключить строгую очистку ОЗУ"
+            ><span></span></button>
+          </div>
+        </div>
+      </div>
 
       <div class="studio-card">
         <div class="studio-card-head">

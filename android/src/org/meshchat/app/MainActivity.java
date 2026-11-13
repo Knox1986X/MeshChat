@@ -1,7 +1,8 @@
-// Главный экран Android-приложения MeshChat v1.4.
+// Главный экран Android-приложения MeshChat v1.5.
 // Запускает изолированный SOCKS5-мост (127.0.0.1:27700) и собственный локальный узел (127.0.0.1:27701),
-// сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault)
-// и позволяет в 1 нажатие удалить устаревшую копию пакета org.meshchat.app (v1.1/v1.2).
+// сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault),
+// управляет защитой от скриншотов (по умолчанию ВЫКЛ — скриншоты разрешены, переключается в Настройках)
+// и делегирует системную кнопку/жест «Назад» в SPA-навигацию интерфейса.
 
 package org.meshchat.app;
 
@@ -34,6 +35,8 @@ public final class MainActivity extends Activity {
     private static final int REQ_RECORD_AUDIO = 1002;
     public static final int REQ_INSTALL_UNKNOWN_APPS = 1003;
     private static final String LEGACY_PACKAGE = "org.meshchat.app";
+    private static final String META_PREFS = "meshchat_meta";
+    private static final String KEY_SCREENSHOT_PROTECTION = "screenshot_protection";
 
     private WebView webView;
     private MeshSocksBridge socksBridge;
@@ -47,9 +50,13 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        SharedPreferences prefs = getSharedPreferences(META_PREFS, MODE_PRIVATE);
+        // Скриншоты по умолчанию разрешены (false); пользователь может включить FLAG_SECURE в Настройках
+        boolean secureScreen = prefs.getBoolean(KEY_SCREENSHOT_PROTECTION, false);
+
         Window window = getWindow();
         if (window != null) {
-            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            applyWindowSecureFlag(secureScreen);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             window.setStatusBarColor(Color.parseColor("#0b0d14"));
             window.setNavigationBarColor(Color.parseColor("#0b0d14"));
@@ -71,9 +78,8 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.parseColor("#0b0d14"));
         configureWebView(webView);
 
-        // При обновлении версии очищаем ТОЛЬКО HTTP-кеш файлов (IndexedDB и AndroidKeyStore не затрагиваются!)
+        // При обновлении версии очищаем ТОЛЬКО HTTP-кеш файлов (IndexedDB и AndroidKeyStore не затрагиваются)
         int currentVerCode = getCurrentVersionCode();
-        SharedPreferences prefs = getSharedPreferences("meshchat_meta", MODE_PRIVATE);
         int prevVerCode = prefs.getInt("last_ver_code", -1);
         if (prevVerCode != currentVerCode) {
             webView.clearCache(true);
@@ -90,12 +96,26 @@ public final class MainActivity extends Activity {
         webView.loadUrl("http://127.0.0.1:" + port + "/?v=" + currentVerCode);
     }
 
+    private void applyWindowSecureFlag(boolean enabled) {
+        Window window = getWindow();
+        if (window == null) return;
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
+    private boolean isScreenshotProtectionActive() {
+        return getSharedPreferences(META_PREFS, MODE_PRIVATE).getBoolean(KEY_SCREENSHOT_PROTECTION, false);
+    }
+
     private int getCurrentVersionCode() {
         try {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             return pi.versionCode;
         } catch (Exception e) {
-            return 5;
+            return 6;
         }
     }
 
@@ -219,8 +239,20 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView != null) {
+            webView.evaluateJavascript(
+                    "(window.__meshChatHandleBack && window.__meshChatHandleBack()) ? '1' : '0'",
+                    value -> {
+                        if ("\"1\"".equals(value) || "1".equals(value)) {
+                            return;
+                        }
+                        if (webView != null && webView.canGoBack()) {
+                            webView.goBack();
+                        } else {
+                            MainActivity.super.onBackPressed();
+                        }
+                    }
+            );
             return;
         }
         super.onBackPressed();
@@ -237,7 +269,7 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами, автообновлением и аппаратным хранилищем AndroidKeyStore */
+    /** Нативный мост управления узлами, автообновлением, FLAG_SECURE и AndroidKeyStore */
     public final class AndroidJsBridge {
         @JavascriptInterface
         public String getAppInfoJson() {
@@ -250,10 +282,26 @@ public final class MainActivity extends Activity {
                 o.put("localPort", localNode != null ? localNode.getBoundPort() : MeshLocalNode.LOCAL_PORT);
                 o.put("bridgePort", socksBridge != null ? socksBridge.getBoundPort() : MeshSocksBridge.BRIDGE_PORT);
                 o.put("legacyInstalled", isLegacyPackageInstalled());
+                o.put("screenshotProtection", isScreenshotProtectionActive());
                 return o.toString();
             } catch (Exception e) {
-                return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false}";
+                return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false,\"screenshotProtection\":false}";
             }
+        }
+
+        @JavascriptInterface
+        public boolean isScreenshotProtectionEnabled() {
+            return isScreenshotProtectionActive();
+        }
+
+        @JavascriptInterface
+        public boolean setScreenshotProtection(boolean enabled) {
+            getSharedPreferences(META_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_SCREENSHOT_PROTECTION, enabled)
+                    .apply();
+            runOnUiThread(() -> applyWindowSecureFlag(enabled));
+            return enabled;
         }
 
         @JavascriptInterface

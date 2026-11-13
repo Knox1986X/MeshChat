@@ -3,6 +3,7 @@
 
 import { html, useState } from '../../vendor/preact.mjs';
 import {
+  store,
   useAppStore,
   APP_VERSION,
   DEFAULT_CLOUD_URL,
@@ -14,6 +15,7 @@ import {
   uninstallLegacyApk,
   applyAppUpdate,
   dismissUpdateBanner,
+  dismissToast,
   setNavTab,
 } from '../store/app-store.mjs';
 import { Sidebar } from './sidebar.mjs';
@@ -74,7 +76,14 @@ function AuthScreen() {
       await registerAccount({ username, password });
     } else {
       await loginAccount({ username, password, recoveryKey });
-      if (authError?.includes('Recovery Key')) setNeedRecoveryField(true);
+      const latestErr = store.authError || '';
+      if (
+        latestErr.includes('Recovery') ||
+        latestErr.includes('восстановлен') ||
+        latestErr.includes('новом устройстве')
+      ) {
+        setNeedRecoveryField(true);
+      }
     }
   };
 
@@ -135,7 +144,7 @@ function AuthScreen() {
           type="password"
           required
           minLength="8"
-          placeholder="Минимум 8 символов — сохраняется как неизвлекаемый ключ"
+          placeholder="Минимум 8 символов (локально)"
           value=${password}
           onInput=${(e) => setPassword(e.target.value)}
         />
@@ -307,7 +316,11 @@ export function AppRoot() {
     <${ModalLayer} />
 
     <div class="toast-stack">
-      ${s.ui.toasts.map((t) => html`<div key=${t.id} class=${`toast ${t.kind}`}>${t.text}</div>`)}
+      ${s.ui.toasts.map((t) => html`<div
+        key=${t.id}
+        class=${`toast ${t.kind}`}
+        onClick=${() => dismissToast(t.id)}
+      >${t.text}</div>`)}
     </div>
   </div>`;
 }

@@ -267,7 +267,7 @@ export function AvatarBox({
 
   return html`<div
     class=${`avatar-box ${className}`}
-    style=${`width:${size}px;height:${size}px;background:${avatarDataUrl ? '#0e111b' : color}`}
+    style=${`width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;background:${avatarDataUrl ? '#0e111b' : color}`}
     onClick=${onClick}
   >
     ${avatarDataUrl
@@ -313,41 +313,54 @@ const SAMPLE_ROWS = [
 
 export function BossScreen({ title, onExit }) {
   const [selectedCell, setSelectedCell] = useState('C4');
-  return html`<div class="boss-overlay" onDblClick=${onExit}>
+  const [lastTapAt, setLastTapAt] = useState(0);
+
+  const onTouchUnlock = () => {
+    const now = Date.now();
+    if (now - lastTapAt < 420) {
+      onExit?.();
+      return;
+    }
+    setLastTapAt(now);
+  };
+
+  return html`<div class="boss-overlay" onDblClick=${onExit} onTouchEnd=${onTouchUnlock}>
     <div class="boss-topbar">
       <span class="boss-badge">XLSX</span>
-      <strong>${title || 'Финансовая_модель_Q4_консолидация.xlsx'}</strong>
-      <span class="boss-hint">Только чтение · Двойной клик или Esc×2 для разблокировки</span>
+      <strong class="boss-doc-title">${title || 'Финансовая_модель_Q4_консолидация.xlsx'}</strong>
+      <button type="button" class="boss-unlock-btn" onClick=${onExit}>Вернуться</button>
     </div>
     <div class="boss-formula">
       <span class="boss-cell-id">${selectedCell}</span>
       <span class="boss-fx">fx</span>
       <span>=СУММ(C2:C6)*КОЭФ_ИНДЕКСАЦИИ_Q4</span>
     </div>
-    <table class="boss-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>A · Статья бюджета</th>
-          <th>B · План (тыс.)</th>
-          <th>C · Факт (тыс.)</th>
-          <th>D · Отклонение</th>
-          <th>E · Статус</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${SAMPLE_ROWS.map((row, rIdx) => html`<tr key=${rIdx}>
-          <td class="boss-rownum">${rIdx + 2}</td>
-          ${row.map((val, cIdx) => {
-            const addr = `${String.fromCharCode(65 + cIdx)}${rIdx + 2}`;
-            return html`<td
-              key=${cIdx}
-              class=${selectedCell === addr ? 'boss-selected' : ''}
-              onClick=${() => setSelectedCell(addr)}
-            >${val}</td>`;
-          })}
-        </tr>`)}
-      </tbody>
-    </table>
+    <div class="boss-table-wrap">
+      <table class="boss-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>A · Статья бюджета</th>
+            <th>B · План (тыс.)</th>
+            <th>C · Факт (тыс.)</th>
+            <th>D · Отклонение</th>
+            <th>E · Статус</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${SAMPLE_ROWS.map((row, rIdx) => html`<tr key=${rIdx}>
+            <td class="boss-rownum">${rIdx + 2}</td>
+            ${row.map((val, cIdx) => {
+              const addr = `${String.fromCharCode(65 + cIdx)}${rIdx + 2}`;
+              return html`<td
+                key=${cIdx}
+                class=${selectedCell === addr ? 'boss-selected' : ''}
+                onClick=${() => setSelectedCell(addr)}
+              >${val}</td>`;
+            })}
+          </tr>`)}
+        </tbody>
+      </table>
+    </div>
   </div>`;
 }

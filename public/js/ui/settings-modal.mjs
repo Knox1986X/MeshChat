@@ -13,6 +13,7 @@ import {
   markPeerVerified,
   updateClientSettings,
   toggleAndroidLanMesh,
+  toggleScreenshotProtection,
   checkForUpdates,
   applyAppUpdate,
   rotateBlindMailbox,
@@ -402,6 +403,12 @@ function SettingsModal() {
       </div>
 
       <div class="settings-toggles">
+        ${android?.isApk && html`<div class="insp-row" onClick=${toggleScreenshotProtection}>
+          <span class="insp-label">
+            Защита от скриншотов (FLAG_SECURE) — по умолчанию выключена
+          </span>
+          <span class=${`ios-switch ${android.screenshotProtection ? 'on' : ''}`}><i></i></span>
+        </div>`}
         ${android?.isApk && html`<div class="insp-row" onClick=${toggleAndroidLanMesh}>
           <span class="insp-label">
             Локальный ретранслятор Wi-Fi LAN для соседних устройств ${android.lanMeshRunning && android.lanUrl ? `(${android.lanUrl})` : '(:3000)'}

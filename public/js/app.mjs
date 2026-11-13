@@ -4,8 +4,16 @@
 //   - глобальная горячая клавиша двойного Esc (экстренная блокировка экрана).
 
 import { html, render } from '../vendor/preact.mjs';
-import { bootClientApp, store, toggleBossMode, notifyStore } from './store/app-store.mjs';
+import {
+  bootClientApp,
+  store,
+  toggleBossMode,
+  handleBackNavigation,
+  notifyStore,
+} from './store/app-store.mjs';
 import { AppRoot } from './ui/layout.mjs';
+
+globalThis.__meshChatHandleBack = handleBackNavigation;
 
 let lastEscAt = 0;
 window.addEventListener('keydown', (e) => {

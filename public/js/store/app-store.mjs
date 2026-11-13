@@ -37,8 +37,8 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.4.0';
-export const APP_VERSION_CODE = 5;
+export const APP_VERSION = '1.5.0';
+export const APP_VERSION_CODE = 6;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -208,6 +208,7 @@ export const store = {
     isApk: Boolean(globalThis.MeshChatAndroid),
     packageName: 'io.meshchat.app',
     legacyInstalled: false,
+    screenshotProtection: false,
     lanMeshRunning: false,
     lanUrl: '',
   },
@@ -272,12 +273,17 @@ export function useAppStore() {
 
 export function showToast(text, kind = 'info') {
   const id = toBase64Url(randomBytes(6));
-  store.ui.toasts = [...store.ui.toasts.slice(-3), { id, text, kind }];
+  store.ui.toasts = [...store.ui.toasts.slice(-1), { id, text, kind }];
   notifyStore();
   setTimeout(() => {
     store.ui.toasts = store.ui.toasts.filter((t) => t.id !== id);
     notifyStore();
-  }, 4200);
+  }, 2800);
+}
+
+export function dismissToast(id) {
+  store.ui.toasts = store.ui.toasts.filter((t) => t.id !== id);
+  notifyStore();
 }
 
 /** Применяет выбранную тему и кастомные цвета к CSS-переменным документа */
@@ -393,6 +399,7 @@ function syncAndroidNativeBridge() {
       const info = JSON.parse(globalThis.MeshChatAndroid.getAppInfoJson() || '{}');
       if (info.packageName) store.android.packageName = info.packageName;
       store.android.legacyInstalled = Boolean(info.legacyInstalled);
+      store.android.screenshotProtection = Boolean(info.screenshotProtection);
       if (info.bridgePort) {
         store.settings.localBridgeUrl = `ws://127.0.0.1:${info.bridgePort}`;
       }
@@ -413,6 +420,61 @@ export function uninstallLegacyApk() {
   if (globalThis.MeshChatAndroid?.uninstallLegacyPackage) {
     globalThis.MeshChatAndroid.uninstallLegacyPackage();
   }
+}
+
+export function toggleScreenshotProtection() {
+  if (!globalThis.MeshChatAndroid?.setScreenshotProtection) {
+    showToast('Управление системным флагом FLAG_SECURE доступно в Android-приложении MeshChat.apk');
+    return;
+  }
+  try {
+    const next = !store.android.screenshotProtection;
+    const applied = Boolean(globalThis.MeshChatAndroid.setScreenshotProtection(next));
+    store.android.screenshotProtection = applied;
+    showToast(
+      applied
+        ? 'Защита от скриншотов (FLAG_SECURE) включена'
+        : 'Скриншоты и запись экрана разрешены'
+    );
+    notifyStore();
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
+}
+
+export function handleBackNavigation() {
+  if (store.ui.bossActive) {
+    toggleBossMode(false);
+    return true;
+  }
+  if (store.ui.modal) {
+    if (store.ui.modal === 'once-viewer' && store.ui.modalData?.url) {
+      URL.revokeObjectURL(store.ui.modalData.url);
+    }
+    store.ui.modal = null;
+    store.ui.modalData = null;
+    notifyStore();
+    return true;
+  }
+  if (store.ui.inspectorOpen) {
+    store.ui.inspectorOpen = false;
+    notifyStore();
+    return true;
+  }
+  const isMobileViewport =
+    Boolean(globalThis.MeshChatAndroid) ||
+    (typeof window !== 'undefined' && window.innerWidth <= 860);
+  if (store.ui.navTab === 'chats' && store.ui.activeChatId && isMobileViewport) {
+    store.ui.activeChatId = null;
+    notifyStore();
+    return true;
+  }
+  if (store.me && store.ui.navTab && store.ui.navTab !== 'chats') {
+    store.ui.navTab = 'chats';
+    notifyStore();
+    return true;
+  }
+  return false;
 }
 
 export function toggleAndroidLanMesh() {
@@ -2020,18 +2082,29 @@ export async function markPeerVerified(chatId, verified = true) {
 
 export async function blockAnonQuestionAuthor(senderBlockTag) {
   if (!rpcChannel || !senderBlockTag) return;
-  await rpcChannel.request('ask.block', { senderBlockTag });
-  showToast('Отправитель заблокирован по слепому HMAC-идентификатору');
+  try {
+    await rpcChannel.request('ask.block', { senderBlockTag });
+    showToast('Отправитель заблокирован по слепому HMAC-идентификатору');
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
 }
 
 export async function rotateBlindMailbox() {
-  if (!rpcChannel) return;
-  const { data } = await rpcChannel.request('mailbox.rotate');
-  store.me.mailboxId = data.mailboxId;
-  store.me.mailboxWriteToken = data.mailboxWriteToken;
-  await clientDb.set('me', store.me);
-  showToast('Адрес слепого почтового ящика перевыпущен. Прежние токены отозваны.');
-  notifyStore();
+  if (!rpcChannel) {
+    showToast('Нет активного соединения с узлом ретрансляции', 'err');
+    return;
+  }
+  try {
+    const { data } = await rpcChannel.request('mailbox.rotate');
+    store.me.mailboxId = data.mailboxId;
+    store.me.mailboxWriteToken = data.mailboxWriteToken;
+    await clientDb.set('me', store.me);
+    showToast('Адрес слепого почтового ящика перевыпущен. Прежние токены отозваны.');
+    notifyStore();
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
 }
 
 export async function updateClientSettings(patch) {

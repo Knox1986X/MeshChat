@@ -38,6 +38,7 @@ export function ChatView() {
 
   const [draft, setDraft] = useState('');
   const [onceToggle, setOnceToggle] = useState(false);
+  const [activeMsgActionsId, setActiveMsgActionsId] = useState(null);
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -53,8 +54,8 @@ export function ChatView() {
         <div class="empty-icon"><${Icon} name="mesh" size=${34} /></div>
         <h2>Сквозное шифрование Signal Protocol</h2>
         <p>
-          Все сообщения, файлы и кастомные профили защищены <b>X3DH + Double Ratchet</b>
-          (NIST P-256, HKDF-SHA256, AES-256-GCM) в конвертах <b>Sealed Sender</b>.
+          Все сообщения, файлы и кастомные профили защищены <b>X3DH + Double Ratchet</b> (NIST P-256,
+          HKDF-SHA256, AES-256-GCM) в конвертах <b>Sealed Sender</b>.
           Узел ретрансляции не хранит метаданные и IP-адреса.
         </p>
         <div class="empty-actions">
@@ -195,7 +196,10 @@ export function ChatView() {
               size=${30}
             />`}
 
-            <div class=${`msg-bubble ${m.out ? 'bubble-out' : isSystemNotice ? 'bubble-amber' : 'bubble-in'}`}>
+            <div
+              class=${`msg-bubble ${m.out ? 'bubble-out' : isSystemNotice ? 'bubble-amber' : 'bubble-in'} ${activeMsgActionsId === m.id ? 'actions-open' : ''}`}
+              onClick=${() => setActiveMsgActionsId((cur) => (cur === m.id ? null : m.id))}
+            >
               <div class="msg-meta-top">
                 <span class="msg-author">
                   ${m.out ? 'Вы' : m.type === 'ask' ? 'Анонимный отправитель (E2E)' : displayTitle}
@@ -252,16 +256,23 @@ export function ChatView() {
                 </button>
               </div>`}
 
-              ${(chat.kind === 'dm' || chat.kind === 'echo') && html`<div class="msg-hover-bar">
+              ${(chat.kind === 'dm' || chat.kind === 'echo') && html`<div class="msg-hover-bar" onClick=${(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   title="Цитировать сообщение"
-                  onClick=${() => { store.ui.replyTo = m; notifyStore(); }}
+                  onClick=${() => {
+                    store.ui.replyTo = m;
+                    setActiveMsgActionsId(null);
+                    notifyStore();
+                  }}
                 ><${Icon} name="reply" size=${13} /></button>
                 ${m.text && html`<button
                   type="button"
                   title="Копировать текст"
-                  onClick=${() => copyMessageText(m.text)}
+                  onClick=${() => {
+                    copyMessageText(m.text);
+                    setActiveMsgActionsId(null);
+                  }}
                 ><${Icon} name="copy" size=${13} /></button>`}
               </div>`}
             </div>
@@ -309,8 +320,8 @@ export function ChatView() {
               class="composer-input"
               type="text"
               placeholder=${chat.kind === 'echo'
-                ? 'Введите текст для эхо-проверки E2EE или заметку…'
-                : 'Сообщение… (||скрытый||, **жирный**, `код`)'}
+                ? 'Текст для эхо-проверки E2EE…'
+                : 'Сообщение (E2EE)…'}
               value=${draft}
               onInput=${(e) => setDraft(e.target.value)}
             />
