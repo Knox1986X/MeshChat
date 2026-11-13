@@ -4,6 +4,7 @@ import { html, useState } from '../../vendor/preact.mjs';
 import {
   useAppStore,
   APP_VERSION,
+  DEFAULT_CLOUD_URL,
   registerAccount,
   loginAccount,
   toggleBossMode,
@@ -135,12 +136,24 @@ function AuthScreen() {
             class="link-btn"
             onClick=${() => setShowNodeBox(!showNodeBox)}
           >${showNodeBox ? '▾ Скрыть настройки узла MeshChat' : '▸ Выбрать сервер / Wi-Fi Mesh / .onion узел'}</button>
-          ${showNodeBox && html`<div style="margin-top:8px;padding:10px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)">
-            <label class="field-label">Адрес сервера MeshChat (пусто = встроенный локальный узел)</label>
+          ${showNodeBox && html`<div style="margin-top:8px;padding:11px;border-radius:12px;background:rgba(255,255,255,0.035);border:1px solid rgba(255,255,255,0.08)">
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+              <button
+                type="button"
+                class="btn-ghost compact"
+                onClick=${() => { setServerUrl(DEFAULT_CLOUD_URL); updateClientSettings({ serverUrl: DEFAULT_CLOUD_URL }); }}
+              >🌐 Облако EU</button>
+              <button
+                type="button"
+                class="btn-ghost compact"
+                onClick=${() => { setServerUrl(''); updateClientSettings({ serverUrl: '' }); }}
+              >📱 Локальный узел</button>
+            </div>
+            <label class="field-label">Адрес сервера MeshChat (пусто = локальный узел)</label>
             <input
               class="field-input"
               type="text"
-              placeholder="https://node.onrender.com, http://192.168.1.5:3000 или .onion"
+              placeholder="https://meshchat-6a11.onrender.com или .onion"
               value=${serverUrl}
               onInput=${(e) => setServerUrl(e.target.value)}
               onBlur=${() => updateClientSettings({ serverUrl })}

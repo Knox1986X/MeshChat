@@ -39,6 +39,7 @@ function pickColor(seedStr = '') {
 export const APP_VERSION = '1.1.0';
 export const APP_VERSION_CODE = 2;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
+export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
 function compareSemver(a = '0.0.0', b = '0.0.0') {
   const pa = String(a).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -86,7 +87,7 @@ export const store = {
     lanUrl: '',
   },
   settings: {
-    serverUrl: '',
+    serverUrl: globalThis.MeshChatAndroid ? DEFAULT_CLOUD_URL : '',
     autoUpdateCheck: true,
     transportPolicy: TRANSPORT_POLICY.AUTO,
     onionUrl: '',
