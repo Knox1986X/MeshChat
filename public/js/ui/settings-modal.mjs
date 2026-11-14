@@ -1,7 +1,8 @@
-// Модальные окна сетевых политик, верификации ключей безопасности и системных параметров:
-//   1. Маршрутизация трафика (Авто / Tor Fail-Closed / I2P Fail-Closed / P2P Mesh / Прямой WSS).
-//   2. Верификация отпечатка безопасности (128-бит HEX + 60 цифр SHA-512 × 5200).
-//   3. Открытие диалога, однократный просмотр вложений [1×] и сохранение ключа восстановления.
+// Модальные окна MeshChat v1.7:
+//   1. Живой голосовой E2EE-вызов P2P WebRTC (DTLS-SRTP) с приёмом/отклонением, микрофоном и сверкой SAS.
+//   2. Генератор и обмен QR-кодами (ISO/IEC 18004 SVG): контакт @username, шлюз /q/ и Wi-Fi LAN узел.
+//   3. Верификация ключей безопасности (QR + 128-бит HEX + 60 цифр SHA-512 × 5200).
+//   4. Профиль собеседника, открытие нового диалога, однократный просмотр [1×] и сетевые параметры.
 
 import { html, useState } from '../../vendor/preact.mjs';
 import { TRANSPORT_POLICY } from '../transport/transport-interface.mjs';
@@ -18,6 +19,15 @@ import {
   applyAppUpdate,
   rotateBlindMailbox,
   logoutAndWipeDevice,
+  startVoiceCall,
+  acceptVoiceCall,
+  declineVoiceCall,
+  hangupVoiceCall,
+  toggleCallMute,
+  dismissCallModal,
+  copyWithPrivacy,
+  clearSingleChatHistory,
+  deleteChat,
   showToast,
 } from '../store/app-store.mjs';
 import {
@@ -25,6 +35,7 @@ import {
   AvatarBox,
   ProfileBadgeIcon,
   AmbientParticles,
+  QrCodeBox,
 } from './boss-screen.mjs';
 import { resolveBannerStyle } from './profile-view.mjs';
 
@@ -65,8 +76,15 @@ function closeModal() {
   notifyStore();
 }
 
+function formatCallDuration(sec) {
+  const s = Math.max(0, Math.floor(Number(sec) || 0));
+  const m = String(Math.floor(s / 60)).padStart(2, '0');
+  const r = String(s % 60).padStart(2, '0');
+  return `${m}:${r}`;
+}
+
 export function ModalLayer() {
-  const { ui, recoveryModalKey } = store;
+  const { ui, recoveryModalKey, call } = store;
 
   if (recoveryModalKey) {
     return html`<div class="modal-backdrop">
@@ -83,10 +101,7 @@ export function ModalLayer() {
           <button
             type="button"
             class="btn-ghost"
-            onClick=${() => {
-              navigator.clipboard?.writeText(recoveryModalKey).catch(() => {});
-              showToast('Ключ восстановления скопирован');
-            }}
+            onClick=${() => copyWithPrivacy(recoveryModalKey, 'Ключ восстановления скопирован')}
           >Копировать</button>
           <button
             type="button"
@@ -98,10 +113,17 @@ export function ModalLayer() {
     </div>`;
   }
 
+  if (call?.active) {
+    return html`<${CallModal} call=${call} />`;
+  }
+
   if (!ui.modal) return null;
 
   if (ui.modal === 'new-chat') {
     return html`<${NewChatModal} />`;
+  }
+  if (ui.modal === 'qr') {
+    return html`<${QrIdentityModal} initialTab=${ui.modalData?.tab || 'contact'} />`;
   }
   if (ui.modal === 'safety') {
     return html`<${SafetyModal} data=${ui.modalData} />`;
@@ -128,26 +150,173 @@ export function ModalLayer() {
       </div>
     </div>`;
   }
-  if (ui.modal === 'call') {
-    const chat = ui.modalData?.chat;
-    return html`<div class="modal-backdrop" onClick=${closeModal}>
-      <div class="modal-card" onClick=${(e) => e.stopPropagation()}>
-        <div class="modal-head">
-          <h3>Голосовой канал DTLS-SRTP · ${chat?.title}</h3>
-          <button type="button" class="icon-btn" onClick=${closeModal}><${Icon} name="close" /></button>
-        </div>
-        <p class="modal-desc">
-          Поток аудио шифруется сквозным образом по DTLS-SRTP. Временные учётные данные TURN действуют 300 секунд
-          без привязки к идентификатору. В политике «Только Tor» прямой сбор ICE-кандидатов заблокирован.
-        </p>
-        <div class="modal-actions">
-          <button type="button" class="btn-primary" onClick=${closeModal}>Завершить вызов</button>
-        </div>
-      </div>
-    </div>`;
-  }
 
   return null;
+}
+
+// ─────────────────────── Живой голосовой E2EE вызов WebRTC (DTLS-SRTP) ───────────────────────
+
+function CallModal({ call }) {
+  const chat = store.chats[call.chatId];
+  const avatarUrl = chat?.peerProfile?.avatarDataUrl || '';
+  const avatarColor = chat?.avatarColor || '#3B4CCA';
+
+  const statusText =
+    call.phase === 'ringing'
+      ? (call.direction === 'incoming'
+        ? 'Входящий зашифрованный вызов DTLS-SRTP…'
+        : 'Шифрование сигналинга и ожидание ответа…')
+      : call.phase === 'connecting'
+        ? 'Установка прямого медиаканала ICE / DTLS-SRTP…'
+        : call.phase === 'connected'
+          ? `Защищённый аудиоканал · ${formatCallDuration(call.elapsedSec)}`
+          : (call.reason || 'Вызов завершён');
+
+  return html`<div class="modal-backdrop">
+    <div class="modal-card call-sheet-card" onClick=${(e) => e.stopPropagation()}>
+      <div class="call-top-pill">
+        <${Icon} name="shield" size=${13} />
+        <span>E2EE СИГНАЛИНГ · DTLS-SRTP ${call.relayOnly ? '· TURN RELAY' : '· P2P'}</span>
+      </div>
+
+      <div class=${`call-avatar-pulse ${call.phase === 'ringing' || call.phase === 'connecting' ? 'pulsing' : ''}`}>
+        <${AvatarBox}
+          title=${call.peerTitle}
+          username=${chat?.username || ''}
+          avatarDataUrl=${avatarUrl}
+          color=${avatarColor}
+          size=${88}
+        />
+      </div>
+
+      <h3 class="call-peer-title">${call.peerTitle}</h3>
+      <div class="call-phase-label">${statusText}</div>
+
+      ${call.phase === 'connected' && html`<div class="call-mic-meter" title="Уровень вашего микрофона">
+        <div class="call-mic-fill" style=${`width:${call.muted ? 0 : Math.max(8, call.micLevel)}%`}></div>
+      </div>`}
+
+      ${call.dtlsSas && html`<div class="call-sas-box">
+        <span>Код сверки DTLS SAS (должен совпадать у обоих):</span>
+        <code>${call.dtlsSas}</code>
+      </div>`}
+
+      <div class="call-controls-row">
+        ${call.phase === 'ringing' && call.direction === 'incoming'
+          ? html`
+              <button type="button" class="call-round-btn danger" title="Отклонить" onClick=${declineVoiceCall}>
+                <${Icon} name="phoneOff" size=${20} />
+                <span>Отклонить</span>
+              </button>
+              <button type="button" class="call-round-btn accept" title="Принять вызов" onClick=${acceptVoiceCall}>
+                <${Icon} name="phone" size=${20} />
+                <span>Принять</span>
+              </button>
+            `
+          : call.phase === 'ended'
+            ? html`<button type="button" class="btn-ghost" onClick=${dismissCallModal}>Закрыть</button>`
+            : html`
+                <button
+                  type="button"
+                  class=${`call-round-btn ${call.muted ? 'muted' : 'neutral'}`}
+                  title=${call.muted ? 'Включить микрофон' : 'Отключить микрофон'}
+                  onClick=${toggleCallMute}
+                >
+                  <${Icon} name=${call.muted ? 'micOff' : 'mic'} size=${19} />
+                  <span>${call.muted ? 'Вкл. микр.' : 'Микрофон'}</span>
+                </button>
+                <button type="button" class="call-round-btn danger" title="Завершить вызов" onClick=${hangupVoiceCall}>
+                  <${Icon} name="phoneOff" size=${20} />
+                  <span>Завершить</span>
+                </button>
+              `}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── Модальное окно QR-кодов и быстрого подключения ───────────────────────
+
+function QrIdentityModal({ initialTab = 'contact' }) {
+  const { me, settings, android } = store;
+  const [tab, setTab] = useState(initialTab);
+  const [peerUri, setPeerUri] = useState('');
+
+  const originBase = settings.serverUrl
+    ? settings.serverUrl.replace(/\/+$/, '')
+    : (typeof location !== 'undefined' ? location.origin : 'https://meshchat-6a11.onrender.com');
+
+  const contactUri = `meshchat://contact/${me?.username || ''}?fp=${me?.publicKeyShort || ''}`;
+  const askUrl = `${originBase}/q/${me?.username || ''}`;
+  const lanUrl = android.lanMeshRunning && android.lanUrl ? android.lanUrl : originBase;
+
+  const activeValue = tab === 'ask' ? askUrl : tab === 'lan' ? lanUrl : contactUri;
+
+  const onConnectParsed = async (e) => {
+    e.preventDefault();
+    const raw = peerUri.trim();
+    if (!raw) return;
+    let uname = raw;
+    const m = raw.match(/meshchat:\/\/contact\/([^/?#]+)/i) || raw.match(/\/q\/([^/?#]+)/i);
+    if (m) uname = decodeURIComponent(m[1]);
+    try {
+      await startChatWithUsername(uname);
+      closeModal();
+    } catch (err) {
+      showToast(err.message, 'err');
+    }
+  };
+
+  return html`<div class="modal-backdrop" onClick=${closeModal}>
+    <div class="modal-card" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal-head">
+        <h3>QR-визитка и быстрый обмен</h3>
+        <button type="button" class="icon-btn" onClick=${closeModal}><${Icon} name="close" /></button>
+      </div>
+
+      <div class="chip-grid" style="justify-content:center;margin-bottom:12px">
+        <button
+          type="button"
+          class=${`choice-chip ${tab === 'contact' ? 'active' : ''}`}
+          onClick=${() => setTab('contact')}
+        >Контакт @${me?.username}</button>
+        <button
+          type="button"
+          class=${`choice-chip ${tab === 'ask' ? 'active' : ''}`}
+          onClick=${() => setTab('ask')}
+        >Шлюз /q/</button>
+        <button
+          type="button"
+          class=${`choice-chip ${tab === 'lan' ? 'active' : ''}`}
+          onClick=${() => setTab('lan')}
+        >${android.lanMeshRunning ? 'Wi-Fi LAN' : 'Узел'}</button>
+      </div>
+
+      <div class="qr-modal-center">
+        <${QrCodeBox} value=${activeValue} size=${192} />
+        <code class="qr-value-caption">${activeValue}</code>
+        <button
+          type="button"
+          class="btn-ghost compact"
+          onClick=${() => copyWithPrivacy(activeValue, 'URI скопирован в буфер обмена')}
+        ><${Icon} name="copy" size=${14} /> Копировать строку</button>
+      </div>
+
+      <form onSubmit=${onConnectParsed} style="margin-top:14px">
+        <label class="field-label">Открыть контакт по считанному URI или @username</label>
+        <div class="inline-form-row">
+          <input
+            class="field-input"
+            type="text"
+            placeholder="meshchat://contact/... или @username"
+            value=${peerUri}
+            onInput=${(e) => setPeerUri(e.target.value)}
+          />
+          <button type="submit" class="btn-primary compact">Открыть</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
 }
 
 function NewChatModal() {
@@ -157,9 +326,12 @@ function NewChatModal() {
   const submit = async (e) => {
     e.preventDefault();
     if (!username.trim() || loading) return;
+    let clean = username.trim();
+    const m = clean.match(/meshchat:\/\/contact\/([^/?#]+)/i);
+    if (m) clean = decodeURIComponent(m[1]);
     setLoading(true);
     try {
-      await startChatWithUsername(username);
+      await startChatWithUsername(clean);
       closeModal();
     } catch (err) {
       showToast(err.message, 'err');
@@ -175,8 +347,8 @@ function NewChatModal() {
         <button type="button" class="icon-btn" onClick=${closeModal}><${Icon} name="close" /></button>
       </div>
       <p class="modal-desc">
-        Укажите <code>@username</code> собеседника. Клиент загрузит подписанный пакет ключей,
-        проверит цифровую подпись ECDSA P-256 и зафиксирует идентификатор (TOFU).
+        Укажите <code>@username</code> или <code>meshchat://</code>-ссылку собеседника. Клиент загрузит
+        подписанный пакет ключей, проверит цифровую подпись ECDSA P-256 и зафиксирует идентификатор (TOFU).
       </p>
       <input
         class="field-input"
@@ -187,6 +359,11 @@ function NewChatModal() {
         onInput=${(e) => setUsername(e.target.value)}
       />
       <div class="modal-actions">
+        <button
+          type="button"
+          class="btn-ghost"
+          onClick=${() => { store.ui.modal = 'qr'; notifyStore(); }}
+        ><${Icon} name="qr" size=${14} /> Мой QR</button>
         <button type="button" class="btn-ghost" onClick=${closeModal}>Отмена</button>
         <button type="submit" class="btn-primary" disabled=${loading}>
           ${loading ? 'Проверка ключей…' : 'Открыть диалог'}
@@ -251,19 +428,34 @@ function PeerProfileModal({ data }) {
           </div>
         </div>`}
 
-        <div class="modal-actions">
+        <div class="modal-actions" style="flex-wrap:wrap">
           <button
             type="button"
-            class="btn-ghost"
+            class="btn-ghost compact"
             onClick=${() => {
-              store.ui.modal = 'call';
-              store.ui.modalData = { chat };
-              notifyStore();
+              clearSingleChatHistory(chatId);
+              closeModal();
+            }}
+          ><${Icon} name="trash" size=${14} /> Очистить чат</button>
+          <button
+            type="button"
+            class="btn-danger compact"
+            onClick=${() => {
+              deleteChat(chatId);
+              closeModal();
+            }}
+          >Удалить диалог</button>
+          <button
+            type="button"
+            class="btn-ghost compact"
+            onClick=${() => {
+              closeModal();
+              startVoiceCall(chatId);
             }}
           ><${Icon} name="phone" size=${15} /> Звонок P2P</button>
           <button
             type="button"
-            class="btn-primary"
+            class="btn-primary compact"
             onClick=${() => markPeerVerified(chatId, !chat.verified)}
           >${chat.verified ? 'Снять верификацию' : 'Подтвердить ключ'}</button>
         </div>
@@ -284,9 +476,13 @@ function SafetyModal({ data }) {
         <button type="button" class="icon-btn" onClick=${closeModal}><${Icon} name="close" /></button>
       </div>
       <p class="modal-desc">
-        Сверьте 128-битный шестнадцатеричный дайджест или 60-значный цифровой код с собеседником по независимому каналу
+        Отсканируйте QR-код отпечатка или сверьте 60-значный контрольный код с собеседником по независимому каналу
         (5200 раундов SHA-512). Совпадение исключает атаку посредника (MITM).
       </p>
+
+      ${safetyNumber.qrPayload && html`<div class="qr-modal-center" style="margin-bottom:10px">
+        <${QrCodeBox} value=${safetyNumber.qrPayload} size=${164} />
+      </div>`}
 
       ${hexBlocks.length > 0 && html`<div class="safety-section-caption">ДАЙДЖЕСТ КЛЮЧЕЙ (SHA-512 / 128 БИТ HEX)</div>
       <div class="safety-hex-grid">
@@ -296,10 +492,6 @@ function SafetyModal({ data }) {
       <div class="safety-section-caption">КОНТРОЛЬНЫЙ КОД БЕЗОПАСНОСТИ (60 ЦИФР)</div>
       <div class="safety-digits-grid">
         ${safetyNumber.blocks.map((b) => html`<code>${b}</code>`)}
-      </div>
-
-      <div class="safety-qr-str">
-        <span>URI верификации:</span> <code>${safetyNumber.qrPayload}</code>
       </div>
 
       <div class="modal-actions">
@@ -420,7 +612,7 @@ function SettingsModal() {
           <span class=${`ios-switch ${settings.autoUpdateCheck !== false ? 'on' : ''}`}><i></i></span>
         </div>
         <div class="insp-row" onClick=${() => updateClientSettings({ coverTraffic: !settings.coverTraffic })}>
-          <span class="insp-label">Фоновый маскирующий трафик (пакеты 512 Б против корреляции)</span>
+          <span class="insp-label">Фоновый маскирующий трафик против корреляции</span>
           <span class=${`ios-switch ${settings.coverTraffic ? 'on' : ''}`}><i></i></span>
         </div>
         <div class="insp-row" onClick=${() => updateClientSettings({ strictBossWipe: !settings.strictBossWipe })}>

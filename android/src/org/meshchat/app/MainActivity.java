@@ -1,13 +1,20 @@
-// Главный экран Android-приложения MeshChat v1.6.
+// Главный экран Android-приложения MeshChat v1.7.
 // Запускает изолированный SOCKS5-мост (127.0.0.1:27700) и собственный локальный узел (127.0.0.1:27701),
 // сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault),
 // управляет защитой от скриншотов FLAG_SECURE (по умолчанию ВЫКЛ), удержанием экрана, цветом системных баров,
-// тактильной вибрацией и системным жестом «Назад».
+// сохранением экспортируемых файлов в Загрузки, локальными уведомлениями, вибрацией и жестом «Назад».
 
 package org.meshchat.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.ClipData;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -15,9 +22,13 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.provider.MediaStore;
+import android.util.Base64;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
@@ -33,14 +44,22 @@ import android.widget.FrameLayout;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.util.concurrent.atomic.AtomicInteger;
+
 public final class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 1001;
     private static final int REQ_RECORD_AUDIO = 1002;
     public static final int REQ_INSTALL_UNKNOWN_APPS = 1003;
+    private static final int REQ_POST_NOTIFICATIONS = 1004;
+
     private static final String LEGACY_PACKAGE = "org.meshchat.app";
     private static final String META_PREFS = "meshchat_meta";
     private static final String KEY_SCREENSHOT_PROTECTION = "screenshot_protection";
     private static final String KEY_KEEP_SCREEN_ON = "keep_screen_on";
+    private static final String NOTIF_CHANNEL_ID = "meshchat_e2ee_messages";
 
     private WebView webView;
     private MeshSocksBridge socksBridge;
@@ -49,6 +68,8 @@ public final class MainActivity extends Activity {
     private MeshNativeVault nativeVault;
     private ValueCallback<Uri[]> fileUploadCallback;
     private PermissionRequest pendingWebRtcPermission;
+    private volatile boolean isForeground = true;
+    private final AtomicInteger notifSeq = new AtomicInteger(2000);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -67,6 +88,7 @@ public final class MainActivity extends Activity {
             window.setNavigationBarColor(Color.parseColor("#0b0d14"));
         }
 
+        ensureNotificationChannel();
         nativeVault = new MeshNativeVault(this);
 
         socksBridge = new MeshSocksBridge();
@@ -99,6 +121,22 @@ public final class MainActivity extends Activity {
 
         int port = localNode.getBoundPort();
         webView.loadUrl("http://127.0.0.1:" + port + "/?v=" + currentVerCode);
+    }
+
+    private void ensureNotificationChannel() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            NotificationChannel ch = new NotificationChannel(
+                    NOTIF_CHANNEL_ID,
+                    "Сообщения и вызовы E2EE",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            ch.setDescription("Локальные уведомления MeshChat о входящих зашифрованных пакетах");
+            ch.enableVibration(true);
+            nm.createNotificationChannel(ch);
+        } catch (Exception ignored) {
+        }
     }
 
     private void applyWindowSecureFlag(boolean enabled) {
@@ -134,7 +172,7 @@ public final class MainActivity extends Activity {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             return pi.versionCode;
         } catch (Exception e) {
-            return 7;
+            return 8;
         }
     }
 
@@ -191,6 +229,10 @@ public final class MainActivity extends Activity {
                     Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.setType("*/*");
+                    if (fileChooserParams != null
+                            && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    }
                     startActivityForResult(Intent.createChooser(intent, "Выберите файл"), REQ_FILE_CHOOSER);
                     return true;
                 } catch (Exception e) {
@@ -224,8 +266,16 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQ_FILE_CHOOSER && fileUploadCallback != null) {
             Uri[] results = null;
-            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
-                results = new Uri[]{data.getData()};
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                ClipData clip = data.getClipData();
+                if (clip != null && clip.getItemCount() > 0) {
+                    results = new Uri[clip.getItemCount()];
+                    for (int i = 0; i < clip.getItemCount(); i++) {
+                        results[i] = clip.getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    results = new Uri[]{data.getData()};
+                }
             }
             fileUploadCallback.onReceiveValue(results);
             fileUploadCallback = null;
@@ -250,10 +300,22 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        isForeground = true;
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancelAll();
+        } catch (Exception ignored) {
+        }
         if (webView != null) {
             webView.onResume();
             webView.evaluateJavascript("window.dispatchEvent(new Event('meshchat:resume'));", null);
         }
+    }
+
+    @Override
+    protected void onPause() {
+        isForeground = false;
+        super.onPause();
     }
 
     @Override
@@ -288,7 +350,7 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами, автообновлением, флагами окна, вибрацией и AndroidKeyStore */
+    /** Нативный мост управления узлами, автообновлением, сохранением файлов, уведомлениями и AndroidKeyStore */
     public final class AndroidJsBridge {
         @JavascriptInterface
         public String getAppInfoJson() {
@@ -361,6 +423,90 @@ public final class MainActivity extends Activity {
                 if (vib != null && vib.hasVibrator()) {
                     vib.vibrate(VibrationEffect.createOneShot(clamped, VibrationEffect.DEFAULT_AMPLITUDE));
                 }
+            } catch (Exception ignored) {
+            }
+        }
+
+        @JavascriptInterface
+        public boolean saveBase64Document(String fileName, String mimeType, String base64Data) {
+            if (base64Data == null || base64Data.isEmpty()) return false;
+            try {
+                byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+                String safeName = (fileName != null && !fileName.trim().isEmpty())
+                        ? fileName.replaceAll("[\\\\/:*?\"<>|]", "_")
+                        : "meshchat-export.bin";
+                String safeMime = (mimeType != null && !mimeType.trim().isEmpty())
+                        ? mimeType
+                        : "application/octet-stream";
+
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Downloads.DISPLAY_NAME, safeName);
+                    values.put(MediaStore.Downloads.MIME_TYPE, safeMime);
+                    values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    ContentResolver resolver = getContentResolver();
+                    Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri != null) {
+                        try (OutputStream os = resolver.openOutputStream(uri)) {
+                            if (os != null) {
+                                os.write(bytes);
+                                os.flush();
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                File dlDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                if (dlDir == null) dlDir = getFilesDir();
+                File out = new File(dlDir, safeName);
+                try (FileOutputStream fos = new FileOutputStream(out)) {
+                    fos.write(bytes);
+                    fos.flush();
+                }
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public void requestNotificationPermission() {
+            if (Build.VERSION.SDK_INT >= 33) {
+                runOnUiThread(() -> {
+                    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_POST_NOTIFICATIONS);
+                    }
+                });
+            }
+        }
+
+        @JavascriptInterface
+        public void showLocalNotification(String title, String body) {
+            if (isForeground) return;
+            try {
+                if (Build.VERSION.SDK_INT >= 33
+                        && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+                NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm == null) return;
+                Intent openIntent = new Intent(MainActivity.this, MainActivity.class);
+                openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                PendingIntent pi = PendingIntent.getActivity(
+                        MainActivity.this,
+                        0,
+                        openIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                );
+                Notification notif = new Notification.Builder(MainActivity.this, NOTIF_CHANNEL_ID)
+                        .setSmallIcon(android.R.drawable.stat_notify_chat)
+                        .setContentTitle(title != null ? title : "MeshChat")
+                        .setContentText(body != null ? body : "Новое зашифрованное сообщение")
+                        .setContentIntent(pi)
+                        .setAutoCancel(true)
+                        .build();
+                nm.notify(notifSeq.incrementAndGet(), notif);
             } catch (Exception ignored) {
             }
         }

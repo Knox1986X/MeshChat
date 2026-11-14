@@ -84,14 +84,19 @@ function AskPage() {
     ${sent && html`<div class="recovery-box">Пакет зашифрован и помещён в слепой почтовый ящик получателя.</div>`}
     ${error && html`<div class="auth-error">${error}</div>`}
 
-    <input
+    <textarea
       class="field-input"
-      type="text"
+      rows="4"
       maxLength="1000"
+      style="resize:vertical;min-height:92px;line-height:1.45"
       placeholder="Текст зашифрованного обращения…"
       value=${text}
       onInput=${(e) => { setSent(false); setText(e.target.value); }}
-    />
+    ></textarea>
+    <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-muted);margin:-4px 2px 4px">
+      <span>ECDH P-256 + AES-256-GCM</span>
+      <span>${text.length} / 1000</span>
+    </div>
 
     <button type="submit" class="btn-primary full" disabled=${sending || text.trim().length < 2}>
       ${sending ? 'Шифрование E2E + Proof-of-Work…' : 'Зашифровать и отправить'}

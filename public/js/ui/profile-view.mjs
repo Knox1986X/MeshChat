@@ -4,6 +4,7 @@
 import { html, useState, useRef } from '../../vendor/preact.mjs';
 import {
   store,
+  notifyStore,
   APP_VERSION,
   APP_VERSION_CODE,
   BANNER_PRESETS,
@@ -271,10 +272,10 @@ export function ProfileView() {
 
       <!-- Информационные карточки профиля -->
       <div class="profile-info-group">
-        <div class="profile-info-item" onClick=${copyUsername}>
+        <div class="profile-info-item" onClick=${() => { store.ui.modal = 'qr'; store.ui.modalData = { tab: 'contact' }; notifyStore(); }}>
           <div class="info-item-main">
             <div class="info-item-val">@${me?.username}</div>
-            <div class="info-item-lbl">Имя пользователя (нажмите, чтобы скопировать)</div>
+            <div class="info-item-lbl">Имя пользователя (нажмите для QR-визитки и копирования)</div>
           </div>
           <${Icon} name="qr" size=${20} />
         </div>

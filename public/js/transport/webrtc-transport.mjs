@@ -50,15 +50,16 @@ export class WebRTCTransport extends BaseTransport {
    * @param {Function} [options.RTCPeerConnectionImpl] Инъекция конструктора для модульных тестов в Node.js
    */
   constructor(options = {}) {
+    const isRelayOnly = Boolean(options.relayOnly || options.iceTransportPolicy === 'relay');
     super({
       id: 'webrtc',
       title: 'WebRTC P2P Mesh (до 8 пиров)',
       kind: 'p2p',
-      exposesIp: !options.relayOnly, // Без relayOnly пиры видят ICE-кандидаты друг друга
+      exposesIp: !isRelayOnly, // Без relayOnly пиры видят ICE-кандидаты друг друга
     });
 
     this.iceServers = options.iceServers || [{ urls: ['stun:stun.cloudflare.com:3478'] }];
-    this.relayOnly = Boolean(options.relayOnly);
+    this.relayOnly = isRelayOnly;
     this.sendSignal = options.sendSignal || null;
     this._PeerConn = options.RTCPeerConnectionImpl || globalThis.RTCPeerConnection;
 

@@ -26,6 +26,7 @@ import '../transport/tor-transport.mjs';
 import '../transport/i2p-transport.mjs';
 import '../transport/webrtc-transport.mjs';
 import { FallbackTransport } from '../transport/fallback-transport.mjs';
+import { E2eeCallManager } from '../transport/call-manager.mjs';
 import { EncryptedClientDb } from './idb-messages.mjs';
 import { playSfx } from '../ui/boss-screen.mjs';
 
@@ -41,8 +42,8 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.6.0';
-export const APP_VERSION_CODE = 7;
+export const APP_VERSION = '1.7.0';
+export const APP_VERSION_CODE = 8;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -232,6 +233,8 @@ export const DEFAULT_SETTINGS = {
   autoDecryptMedia: 'always', // 'always' | '1mb' | 'manual'
   confirmCall: false,
   spellcheck: true,
+  sendReadReceipts: true,
+  sendTypingIndicators: true,
 
   // Приватность, PIN-блокировка и маскировка экрана
   pinHashB64: '',
@@ -240,6 +243,7 @@ export const DEFAULT_SETTINGS = {
   clipboardAutoClearSec: 0,   // 0 | 15 | 30 | 60
   shareProfileE2ee: true,
   acceptAnonGateway: true,
+  notificationContent: 'sender', // 'full' | 'sender' | 'stealth' | 'off'
   strictBossWipe: false,
   bossTemplate: 'xlsx',       // 'xlsx' | 'terminal' | 'notes'
   bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
@@ -325,6 +329,9 @@ export const store = {
   messages: {},
   outbox: [],
   decryptedMediaUrls: {},
+  decryptedMediaBytes: {},
+  typingByChat: {},
+  call: null,
 
   // Состояние интерфейса (5 разделов: Чаты, Контакты, Mesh, Профиль, Настройки)
   ui: {
@@ -335,7 +342,10 @@ export const store = {
     activeChatId: null,
     inspectorOpen: false,
     searchQuery: '',
+    chatSearchOpen: false,
+    chatSearchQuery: '',
     replyTo: null,
+    editingMsg: null,
     onceMode: false,
     bossActive: false,
     pinLocked: false,
@@ -469,6 +479,68 @@ export function copyWithPrivacy(text, toastMessage = 'Скопировано в 
   } else {
     showToast(toastMessage);
   }
+}
+
+/** Универсальное сохранение файла в Android APK (MediaStore Downloads) и браузере */
+export function downloadBytesCrossPlatform(bytesOrText, filename, mime = 'application/octet-stream') {
+  const bytes = typeof bytesOrText === 'string'
+    ? utf8ToBytes(bytesOrText)
+    : (bytesOrText instanceof Uint8Array ? bytesOrText : new Uint8Array(bytesOrText));
+
+  if (globalThis.MeshChatAndroid?.saveBase64Document) {
+    try {
+      let binary = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+      }
+      const stdB64 = btoa(binary);
+      const saved = Boolean(globalThis.MeshChatAndroid.saveBase64Document(filename, mime, stdB64));
+      if (saved) {
+        showToast(`Сохранено в Загрузки: ${filename}`);
+        return true;
+      }
+    } catch { /* fallback to DOM anchor */ }
+  }
+
+  if (typeof document !== 'undefined') {
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    const t = setTimeout(() => URL.revokeObjectURL(url), 4000);
+    t?.unref?.();
+    return true;
+  }
+  return false;
+}
+
+function emitBackgroundNotification(senderTitle, previewText) {
+  const mode = store.settings.notificationContent || 'sender';
+  if (mode === 'off') return;
+
+  const title = mode === 'stealth' ? 'MeshChat' : (senderTitle || 'MeshChat');
+  const body =
+    mode === 'full'
+      ? (previewText || 'Зашифрованное вложение')
+      : 'Новое зашифрованное сообщение (E2EE)';
+
+  try {
+    if (globalThis.MeshChatAndroid?.showLocalNotification) {
+      globalThis.MeshChatAndroid.showLocalNotification(title, body);
+      return;
+    }
+    if (
+      typeof document !== 'undefined' &&
+      document.hidden &&
+      typeof Notification !== 'undefined' &&
+      Notification.permission === 'granted'
+    ) {
+      new Notification(title, { body, tag: 'meshchat-msg' });
+    }
+  } catch { /* ignore */ }
 }
 
 function recordRttSample(ms) {
@@ -1486,6 +1558,89 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     applyPeerProfileToChat(store.chats[chatId], payload.senderProfile);
   }
 
+  // Обработка E2EE сигналинга голосовых вызовов DTLS-SRTP
+  if (payload.type === 'call-signal') {
+    await callManager.handleIncomingSignal(store.chats[chatId], payload, {
+      getIceServers: fetchCurrentIceServers,
+      iceTransportPolicy: store.settings.webrtcIcePolicy || 'all',
+      transportPolicy: store.settings.transportPolicy,
+    });
+    if (payload.action === 'offer' && !store.chats[chatId].muted) {
+      emitBackgroundNotification(
+        store.chats[chatId].peerProfile?.displayName || store.chats[chatId].title,
+        'Входящий голосовой вызов (DTLS-SRTP)'
+      );
+    }
+    return;
+  }
+
+  // Индикатор набора текста (E2EE)
+  if (payload.type === 'typing') {
+    store.typingByChat[chatId] = Date.now() + 4500;
+    notifyStore();
+    const clearT = setTimeout(() => {
+      if ((store.typingByChat[chatId] || 0) <= Date.now()) {
+        delete store.typingByChat[chatId];
+        notifyStore();
+      }
+    }, 4600);
+    clearT?.unref?.();
+    return;
+  }
+
+  // Квитанции доставки и прочтения (✓✓)
+  if (payload.type === 'receipt' && Array.isArray(payload.msgIds)) {
+    const list = store.messages[chatId] || [];
+    let changed = false;
+    const rank = { sending: 0, queued: 1, sent: 2, delivered: 3, read: 4 };
+    const nextStatus = payload.kind === 'read' ? 'read' : 'delivered';
+    for (const m of list) {
+      if (m.out && payload.msgIds.includes(m.id)) {
+        if ((rank[nextStatus] || 0) > (rank[m.status] || 0)) {
+          m.status = nextStatus;
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      await persistChatsAndMessages();
+      notifyStore();
+    }
+    return;
+  }
+
+  // Редактирование сообщения по E2EE
+  if (payload.type === 'edit' && payload.targetMsgId && typeof payload.text === 'string') {
+    const list = store.messages[chatId] || [];
+    const target = list.find((m) => m.id === payload.targetMsgId && !m.out);
+    if (target) {
+      target.text = payload.text.slice(0, 4000);
+      target.editedAt = Date.now();
+      if (list[list.length - 1]?.id === target.id) {
+        store.chats[chatId].lastPreview = target.text.slice(0, 90);
+      }
+      await persistChatsAndMessages();
+      notifyStore();
+    }
+    return;
+  }
+
+  // Удаление сообщения у обоих собеседников по E2EE
+  if (payload.type === 'delete' && payload.targetMsgId) {
+    const list = store.messages[chatId] || [];
+    const next = list.filter((m) => !(m.id === payload.targetMsgId && !m.out));
+    if (next.length !== list.length) {
+      store.messages[chatId] = next;
+      const last = next[next.length - 1];
+      store.chats[chatId].lastPreview = last
+        ? (last.media ? `[Файл] ${last.media.name}` : (last.text || '').slice(0, 90))
+        : 'Сообщение удалено';
+      await persistChatsAndMessages();
+      notifyStore();
+    }
+    return;
+  }
+
   if (payload.type === 'profile-sync') {
     if (payload.profile) applyPeerProfileToChat(store.chats[chatId], payload.profile);
     await persistChatsAndMessages();
@@ -1511,6 +1666,8 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   const list = store.messages[chatId] || (store.messages[chatId] = []);
   if (list.some((m) => m.id === msgId)) return;
 
+  delete store.typingByChat[chatId];
+
   const ttlSec = Number(payload.ttlSec || store.chats[chatId].ttlSec || 0);
   const now = Date.now();
   const msg = {
@@ -1532,17 +1689,36 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   const chat = store.chats[chatId];
   chat.lastTs = msg.ts;
   chat.lastPreview = msg.media
-    ? (msg.media.once ? '[1×] Вложение' : `[Файл] ${msg.media.name}`)
+    ? (msg.media.once
+      ? '[1×] Вложение'
+      : msg.media.mime?.startsWith('audio/')
+        ? 'Голосовое сообщение (E2EE)'
+        : `[Файл] ${msg.media.name}`)
     : msg.text.slice(0, 90);
 
-  if (store.ui.activeChatId !== chatId) {
+  const isChatVisible =
+    store.ui.activeChatId === chatId &&
+    store.ui.navTab === 'chats' &&
+    !store.ui.bossActive &&
+    !store.ui.pinLocked;
+
+  if (!isChatVisible) {
     chat.unread = (chat.unread || 0) + 1;
   }
+
+  // Отправляем E2EE-квитанцию о получении (или сразу о прочтении, если чат открыт)
+  const receiptKind = isChatVisible && store.settings.sendReadReceipts !== false ? 'read' : 'delivered';
+  msg.readSent = receiptKind === 'read';
+  deliverPayloadToPeer(chat, { type: 'receipt', kind: receiptKind, msgIds: [msg.id] }).catch(() => {});
+
   if (!chat.muted && !store.ui.bossActive && !store.ui.pinLocked) {
     if (store.settings.sound !== false) {
       playSfx('incoming', store.settings.soundProfile || 'crystal');
     }
     triggerHaptic('heavy');
+  }
+  if (!chat.muted) {
+    emitBackgroundNotification(chat.peerProfile?.displayName || chat.title, chat.lastPreview);
   }
 
   // Автоматическая предрасшифровка входящих изображений по политике медиа
@@ -1944,15 +2120,128 @@ async function ensureOutgoingSessionForChat(chat) {
   await cryptoWorker.call('establishOutgoingSession', { peerBundle: bundle });
 }
 
+export function markChatRead(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat) return;
+  chat.unread = 0;
+  if (chat.kind === 'dm' && store.settings.sendReadReceipts !== false) {
+    const list = store.messages[chatId] || [];
+    const unreadIds = list.filter((m) => !m.out && !m.readSent).map((m) => m.id);
+    if (unreadIds.length > 0) {
+      for (const m of list) {
+        if (!m.out) m.readSent = true;
+      }
+      deliverPayloadToPeer(chat, { type: 'receipt', kind: 'read', msgIds: unreadIds }).catch(() => {});
+    }
+  }
+  persistChatsAndMessages();
+}
+
 export function selectChat(chatId) {
   store.ui.activeChatId = chatId;
   store.ui.replyTo = null;
+  store.ui.editingMsg = null;
+  store.ui.chatSearchOpen = false;
+  store.ui.chatSearchQuery = '';
   if (chatId) store.ui.navTab = 'chats';
   if (store.chats[chatId]) {
-    store.chats[chatId].unread = 0;
-    persistChatsAndMessages();
+    markChatRead(chatId);
   }
   notifyStore();
+}
+
+let lastTypingSentByChat = {};
+
+export function notifyTypingInChat(chatId) {
+  if (store.settings.sendTypingIndicators === false) return;
+  const chat = store.chats[chatId];
+  if (!chat || chat.kind !== 'dm') return;
+  const now = Date.now();
+  if (now - (lastTypingSentByChat[chatId] || 0) < 2800) return;
+  lastTypingSentByChat[chatId] = now;
+  deliverPayloadToPeer(chat, { type: 'typing' }).catch(() => {});
+}
+
+export async function editChatMessage(chatId, msgId, newText) {
+  const chat = store.chats[chatId];
+  const trimmed = String(newText || '').trim();
+  if (!chat || !trimmed) return;
+  const list = store.messages[chatId] || [];
+  const msg = list.find((m) => m.id === msgId && m.out);
+  if (!msg) return;
+
+  msg.text = trimmed;
+  msg.editedAt = Date.now();
+  store.ui.editingMsg = null;
+  if (list[list.length - 1]?.id === msg.id) {
+    chat.lastPreview = trimmed.slice(0, 90);
+  }
+  await persistChatsAndMessages();
+  notifyStore();
+
+  if (chat.kind === 'dm') {
+    await deliverPayloadToPeer(chat, { type: 'edit', targetMsgId: msgId, text: trimmed });
+  }
+}
+
+export async function deleteChatMessage(chatId, msgId, { forEveryone = false } = {}) {
+  const chat = store.chats[chatId];
+  if (!chat) return;
+  const list = store.messages[chatId] || [];
+  const target = list.find((m) => m.id === msgId);
+  if (!target) return;
+
+  store.messages[chatId] = list.filter((m) => m.id !== msgId);
+  const last = store.messages[chatId][store.messages[chatId].length - 1];
+  chat.lastPreview = last
+    ? (last.media ? `[Файл] ${last.media.name}` : (last.text || '').slice(0, 90))
+    : 'Сообщений нет';
+  await persistChatsAndMessages();
+  notifyStore();
+
+  if (forEveryone && target.out && chat.kind === 'dm') {
+    await deliverPayloadToPeer(chat, { type: 'delete', targetMsgId: msgId });
+    showToast('Сообщение удалено у обоих собеседников');
+  } else {
+    showToast('Сообщение удалено локально');
+  }
+}
+
+export async function toggleChatMute(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat) return;
+  chat.muted = !chat.muted;
+  await persistChatsAndMessages();
+  notifyStore();
+  showToast(chat.muted ? 'Оповещения чата отключены' : 'Оповещения чата включены');
+}
+
+export async function clearSingleChatHistory(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat) return;
+  store.messages[chatId] = [];
+  chat.unread = 0;
+  chat.lastPreview = 'История чата очищена';
+  await persistChatsAndMessages();
+  notifyStore();
+  showToast('История выбранного диалога очищена');
+}
+
+export async function deleteChat(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat || chat.kind === 'echo' || chat.kind === 'ask') {
+    showToast('Системные защищённые каналы можно очистить, но не удалить');
+    return;
+  }
+  delete store.chats[chatId];
+  delete store.messages[chatId];
+  if (store.ui.activeChatId === chatId) {
+    store.ui.activeChatId = null;
+    store.ui.inspectorOpen = false;
+  }
+  await persistChatsAndMessages();
+  notifyStore();
+  showToast('Диалог удалён с устройства');
 }
 
 export async function sendChatMessage(chatId, text, extra = {}) {
@@ -1988,7 +2277,11 @@ export async function sendChatMessage(chatId, text, extra = {}) {
   list.push(localMsg);
   chat.lastTs = now;
   chat.lastPreview = localMsg.media
-    ? (localMsg.media.once ? '[1×] Вложение' : `[Файл] ${localMsg.media.name}`)
+    ? (localMsg.media.once
+      ? '[1×] Вложение'
+      : localMsg.media.mime?.startsWith('audio/')
+        ? 'Голосовое сообщение (E2EE)'
+        : `[Файл] ${localMsg.media.name}`)
     : trimmed.slice(0, 90);
   notifyStore();
 
@@ -2284,12 +2577,25 @@ export async function openEncryptedMedia(msg) {
       notifyStore();
     } else {
       store.decryptedMediaUrls[blobId] = blobUrl;
+      store.decryptedMediaBytes[blobId] = plainBytes;
       notifyStore();
     }
     return blobUrl;
   } catch (err) {
     showToast(err.message, 'err');
     return null;
+  }
+}
+
+export async function saveDecryptedMediaToDevice(msg) {
+  if (!msg?.media?.blobId) return;
+  const { blobId, mime, name } = msg.media;
+  if (!store.decryptedMediaBytes[blobId]) {
+    await openEncryptedMedia(msg);
+  }
+  const bytes = store.decryptedMediaBytes[blobId];
+  if (bytes) {
+    downloadBytesCrossPlatform(bytes, name || 'decrypted.bin', mime || 'application/octet-stream');
   }
 }
 
@@ -2557,15 +2863,8 @@ export async function exportEncryptedBackup(passphrase) {
   };
 
   const jsonStr = JSON.stringify(envelope, null, 2);
-  if (typeof document !== 'undefined') {
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `meshchat-${store.me?.username || 'vault'}-${new Date().toISOString().slice(0, 10)}.enc.json`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-  }
+  const fname = `meshchat-${store.me?.username || 'vault'}-${new Date().toISOString().slice(0, 10)}.enc.json`;
+  downloadBytesCrossPlatform(jsonStr, fname, 'application/json');
   showToast('Зашифрованный архив AES-256-GCM сформирован');
   return envelope;
 }
@@ -2637,6 +2936,7 @@ export function clearDecryptedMediaCache() {
   for (const [blobId, url] of Object.entries(store.decryptedMediaUrls)) {
     try { URL.revokeObjectURL(url); } catch { /* ignore */ }
     delete store.decryptedMediaUrls[blobId];
+    delete store.decryptedMediaBytes[blobId];
     count += 1;
   }
   triggerHaptic('tap');
@@ -2735,4 +3035,96 @@ async function persistChatsAndMessages() {
     clientDb.set('chats', store.chats),
     clientDb.set('messages', store.messages),
   ]);
+}
+
+// ─────────────── Голосовые E2EE P2P вызовы (DTLS-SRTP) и системные уведомления ───────────────
+
+async function fetchCurrentIceServers() {
+  const customStun = (store.settings.customStunUrl || '').trim();
+  const fallbackStun = customStun ? [{ urls: customStun }] : [];
+  if (!rpcChannel || !activeTransport?.isConnected) return fallbackStun;
+  try {
+    const { data } = await rpcChannel.request('turn.credentials', {});
+    return [...(data.iceServers || []), ...fallbackStun];
+  } catch {
+    return fallbackStun;
+  }
+}
+
+const callManager = new E2eeCallManager({
+  sendSignalToChat: async (chat, sigPayload) => {
+    await deliverPayloadToPeer(chat, sigPayload);
+  },
+  onRingTick: () => {
+    const chat = store.chats[callManager.state.chatId];
+    if (!chat?.muted && !store.ui.bossActive && !store.ui.pinLocked) {
+      if (store.settings.sound !== false) playSfx('ring');
+      triggerHaptic('heavy');
+    }
+  },
+  onStateChange: () => {
+    store.call = callManager.state.active ? { ...callManager.state } : null;
+    if (store.call) {
+      store.ui.modal = 'call';
+    } else if (store.ui.modal === 'call') {
+      store.ui.modal = null;
+      store.ui.modalData = null;
+    }
+    notifyStore();
+  },
+});
+
+export async function startVoiceCall(chatId) {
+  const chat = store.chats[chatId];
+  if (!chat || chat.kind !== 'dm') return;
+  try {
+    const iceServers = await fetchCurrentIceServers();
+    await callManager.startOutgoingCall({
+      chat,
+      iceServers,
+      iceTransportPolicy: store.settings.webrtcIcePolicy || 'all',
+      transportPolicy: store.settings.transportPolicy,
+    });
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
+}
+
+export async function acceptVoiceCall() {
+  try {
+    await callManager.acceptIncomingCall();
+  } catch (err) {
+    showToast(err.message, 'err');
+  }
+}
+
+export async function declineVoiceCall() {
+  const chat = store.call?.chatId ? store.chats[store.call.chatId] : null;
+  await callManager.declineIncomingCall(chat);
+}
+
+export async function hangupVoiceCall() {
+  const chat = store.call?.chatId ? store.chats[store.call.chatId] : null;
+  await callManager.hangup(chat);
+}
+
+export function toggleCallMute() {
+  triggerHaptic('tap');
+  return callManager.toggleMute();
+}
+
+export function dismissCallModal() {
+  callManager.dismissEndedModal();
+}
+
+export async function requestSystemNotificationAccess() {
+  if (globalThis.MeshChatAndroid?.requestNotificationPermission) {
+    globalThis.MeshChatAndroid.requestNotificationPermission();
+    showToast('Запрос разрешения системных уведомлений отправлен ОС Android');
+    return;
+  }
+  if (typeof Notification !== 'undefined' && typeof Notification.requestPermission === 'function') {
+    const perm = await Notification.requestPermission();
+    showToast(perm === 'granted' ? 'Системные уведомления разрешены' : 'Уведомления отклонены браузером');
+  }
 }

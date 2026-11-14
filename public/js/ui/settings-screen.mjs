@@ -32,6 +32,7 @@ import {
   resetAllSettingsToDefaults,
   getStorageStats,
   sendMeshTestPacket,
+  requestSystemNotificationAccess,
   triggerHaptic,
   showToast,
 } from '../store/app-store.mjs';
@@ -685,6 +686,30 @@ export function SettingsScreen() {
             <button type="button" class=${`ios-switch ${settings.shareProfileE2ee !== false ? 'on' : ''}`}><span></span></button>
           </div>
 
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendReadReceipts: settings.sendReadReceipts === false })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Отправлять отчёты о прочтении (✓✓ Прочитано)</div>
+              <div class="plugin-sub">Уведомляет собеседника по E2EE о том, что вы открыли и прочитали его сообщения</div>
+            </div>
+            <button type="button" class=${`ios-switch ${settings.sendReadReceipts !== false ? 'on' : ''}`}><span></span></button>
+          </div>
+
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendTypingIndicators: settings.sendTypingIndicators === false })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Индикатор набора текста («печатает…»)</div>
+              <div class="plugin-sub">Отправляет зашифрованный сигнал набора текста в открытый диалог</div>
+            </div>
+            <button type="button" class=${`ios-switch ${settings.sendTypingIndicators !== false ? 'on' : ''}`}><span></span></button>
+          </div>
+
+          <div class="settings-switch-row" onClick=${() => updateClientSettings({ previewInList: settings.previewInList === false })}>
+            <div class="plugin-copy">
+              <div class="plugin-title">Показывать превью сообщений в списке чатов</div>
+              <div class="plugin-sub">Отключите, чтобы скрыть последние реплики на главном экране от посторонних глаз</div>
+            </div>
+            <button type="button" class=${`ios-switch ${settings.previewInList !== false ? 'on' : ''}`}><span></span></button>
+          </div>
+
           <div class="settings-switch-row" onClick=${() => updateClientSettings({ acceptAnonGateway: settings.acceptAnonGateway === false })}>
             <div class="plugin-copy">
               <div class="plugin-title">Принимать сообщения через внешний E2E-шлюз (/q/${me?.username})</div>
@@ -918,13 +943,31 @@ export function SettingsScreen() {
         </div>
       </div>`}
 
-      <!-- 5. ЗВУК И ТАКТИЛЬНЫЙ ОТКЛИК -->
+      <!-- 5. ЗВУК, УВЕДОМЛЕНИЯ И ТАКТИЛЬНЫЙ ОТКЛИК -->
       ${showSection(
         'sound',
-        'звук уведомления аудио синтезатор мелодия кристалл импульс сонар мягкий вибрация отклик haptics'
+        'звук уведомления оповещения фоновые android аудио синтезатор мелодия кристалл импульс сонар мягкий вибрация отклик haptics'
       ) && html`<div class="studio-card">
         <div class="studio-card-head">
-          <h3><${Icon} name="volume" size=${16} /> Звуковой синтезатор и виброотклик</h3>
+          <h3><${Icon} name="volume" size=${16} /> Системные уведомления, звук и виброотклик</h3>
+        </div>
+
+        <label class="field-label">Приватность текста фоновых уведомлений ОС</label>
+        <div class="chip-grid">
+          ${[
+            ['full', 'Имя и текст'],
+            ['sender', 'Только имя'],
+            ['stealth', 'Скрытно (без имён)'],
+            ['off', 'Выключены'],
+          ].map(([id, lbl]) => html`<button
+            key=${id}
+            type="button"
+            class=${`choice-chip ${(settings.notificationContent || 'sender') === id ? 'active' : ''}`}
+            onClick=${() => updateClientSettings({ notificationContent: id })}
+          >${lbl}</button>`)}
+          <button type="button" class="btn-ghost compact" onClick=${requestSystemNotificationAccess}>
+            Разрешить в ОС
+          </button>
         </div>
 
         <div class="settings-rows-list">
