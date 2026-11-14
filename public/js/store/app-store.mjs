@@ -42,13 +42,133 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.7.0';
-export const APP_VERSION_CODE = 8;
+export const APP_VERSION = '1.8.0';
+export const APP_VERSION_CODE = 9;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
-// 10 предустановленных тем оформления приложения
+// 18 предустановленных тем оформления: 8 новогодних и мультиградиентных + 10 классических
 export const THEME_PRESETS = {
+  ny_polar_aurora: {
+    id: 'ny_polar_aurora',
+    category: 'festive',
+    label: 'Полярное сияние',
+    bg0: '#060b16',
+    bg1: '#0b1325',
+    bg2: '#111d36',
+    bg3: '#192a4c',
+    accent: '#38bdf8',
+    accent2: '#818cf8',
+    bubbleOut: '#16355c',
+    appGradient: 'radial-gradient(circle at 16% 12%, rgba(16, 185, 129, 0.16) 0%, transparent 44%), radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.2) 0%, transparent 48%), radial-gradient(circle at 50% 92%, rgba(56, 189, 248, 0.12) 0%, transparent 55%), linear-gradient(180deg, #060b16 0%, #091224 100%)',
+    accentGradient: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 52%, #a855f7 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #0f4c5c 0%, #1e3a8a 52%, #4c1d95 100%)',
+  },
+  ny_pine_gold: {
+    id: 'ny_pine_gold',
+    category: 'festive',
+    label: 'Хвоя и Золото',
+    bg0: '#050f0b',
+    bg1: '#0a1913',
+    bg2: '#10261d',
+    bg3: '#173629',
+    accent: '#f59e0b',
+    accent2: '#10b981',
+    bubbleOut: '#133b2b',
+    appGradient: 'radial-gradient(circle at 18% 10%, rgba(16, 185, 129, 0.2) 0%, transparent 46%), radial-gradient(circle at 85% 18%, rgba(245, 158, 11, 0.17) 0%, transparent 45%), linear-gradient(180deg, #050f0b 0%, #091a13 100%)',
+    accentGradient: 'linear-gradient(135deg, #10b981 0%, #d97706 52%, #fbbf24 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #064e3b 0%, #0f5132 58%, #78350f 100%)',
+  },
+  ny_velvet_ruby: {
+    id: 'ny_velvet_ruby',
+    category: 'festive',
+    label: 'Праздничный Рубин',
+    bg0: '#12060b',
+    bg1: '#1c0b13',
+    bg2: '#29101c',
+    bg3: '#381728',
+    accent: '#fb7185',
+    accent2: '#fbbf24',
+    bubbleOut: '#4c162a',
+    appGradient: 'radial-gradient(circle at 20% 14%, rgba(225, 29, 72, 0.22) 0%, transparent 46%), radial-gradient(circle at 84% 12%, rgba(245, 158, 11, 0.16) 0%, transparent 44%), linear-gradient(180deg, #12060b 0%, #1a0811 100%)',
+    accentGradient: 'linear-gradient(135deg, #e11d48 0%, #f43f5e 52%, #f59e0b 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #7f1d1d 0%, #9f1239 54%, #92400e 100%)',
+  },
+  ny_ice_palace: {
+    id: 'ny_ice_palace',
+    category: 'festive',
+    label: 'Ледяной Кристалл',
+    bg0: '#050c18',
+    bg1: '#0a1528',
+    bg2: '#10213c',
+    bg3: '#183054',
+    accent: '#38bdf8',
+    accent2: '#c084fc',
+    bubbleOut: '#163863',
+    appGradient: 'radial-gradient(circle at 22% 10%, rgba(56, 189, 248, 0.22) 0%, transparent 48%), radial-gradient(circle at 82% 24%, rgba(192, 132, 252, 0.16) 0%, transparent 46%), linear-gradient(180deg, #050c18 0%, #09172e 100%)',
+    accentGradient: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 50%, #818cf8 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #0c4a6e 0%, #1d4ed8 55%, #4338ca 100%)',
+  },
+  ny_fireplace: {
+    id: 'ny_fireplace',
+    category: 'festive',
+    label: 'Тёплый Камин',
+    bg0: '#120a06',
+    bg1: '#1c100a',
+    bg2: '#281810',
+    bg3: '#382217',
+    accent: '#fb923c',
+    accent2: '#facc15',
+    bubbleOut: '#4a2512',
+    appGradient: 'radial-gradient(circle at 20% 15%, rgba(234, 88, 12, 0.22) 0%, transparent 46%), radial-gradient(circle at 80% 82%, rgba(245, 158, 11, 0.16) 0%, transparent 50%), linear-gradient(180deg, #120a06 0%, #1b0e08 100%)',
+    accentGradient: 'linear-gradient(135deg, #ea580c 0%, #f59e0b 55%, #fde047 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #7c2d12 0%, #9a3412 54%, #854d0e 100%)',
+  },
+  ny_champagne: {
+    id: 'ny_champagne',
+    category: 'festive',
+    label: 'Зимнее Шампанское',
+    bg0: '#09090f',
+    bg1: '#11111c',
+    bg2: '#1a1a2b',
+    bg3: '#25253c',
+    accent: '#fbbf24',
+    accent2: '#f472b6',
+    bubbleOut: '#362946',
+    appGradient: 'radial-gradient(circle at 20% 12%, rgba(251, 191, 36, 0.17) 0%, transparent 45%), radial-gradient(circle at 82% 20%, rgba(244, 114, 182, 0.15) 0%, transparent 45%), linear-gradient(180deg, #09090f 0%, #10101c 100%)',
+    accentGradient: 'linear-gradient(135deg, #d97706 0%, #fbbf24 48%, #f472b6 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #4a2c18 0%, #581c4f 56%, #3b1d5e 100%)',
+  },
+  grad_sunset_cyber: {
+    id: 'grad_sunset_cyber',
+    category: 'gradient',
+    label: 'Закатный Градиент',
+    bg0: '#0b0714',
+    bg1: '#140d24',
+    bg2: '#1e1436',
+    bg3: '#2b1d4c',
+    accent: '#ec4899',
+    accent2: '#6366f1',
+    bubbleOut: '#3b1c59',
+    appGradient: 'radial-gradient(circle at 15% 15%, rgba(236, 72, 153, 0.2) 0%, transparent 46%), radial-gradient(circle at 85% 20%, rgba(99, 102, 241, 0.22) 0%, transparent 48%), linear-gradient(180deg, #0b0714 0%, #120b22 100%)',
+    accentGradient: 'linear-gradient(135deg, #ec4899 0%, #8b5cf6 52%, #3b82f6 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #831843 0%, #5b21b6 54%, #1e3a8a 100%)',
+  },
+  grad_ocean_mint: {
+    id: 'grad_ocean_mint',
+    category: 'gradient',
+    label: 'Изумрудный Океан',
+    bg0: '#040d10',
+    bg1: '#08181e',
+    bg2: '#0e252e',
+    bg3: '#153542',
+    accent: '#14b8a6',
+    accent2: '#3b82f6',
+    bubbleOut: '#0f3c4c',
+    appGradient: 'radial-gradient(circle at 18% 14%, rgba(20, 184, 166, 0.2) 0%, transparent 46%), radial-gradient(circle at 84% 22%, rgba(59, 130, 246, 0.18) 0%, transparent 48%), linear-gradient(180deg, #040d10 0%, #07161d 100%)',
+    accentGradient: 'linear-gradient(135deg, #10b981 0%, #06b6d4 52%, #3b82f6 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #065f46 0%, #0e7490 54%, #1e40af 100%)',
+  },
   obsidian: {
     id: 'obsidian',
     label: 'Obsidian Indigo',
@@ -58,6 +178,9 @@ export const THEME_PRESETS = {
     bg3: '#1f2538',
     accent: '#6d7cff',
     bubbleOut: '#263159',
+    appGradient: 'radial-gradient(circle at 20% 10%, rgba(109, 124, 255, 0.14) 0%, transparent 45%), linear-gradient(180deg, #0b0d14 0%, #0e111b 100%)',
+    accentGradient: 'linear-gradient(135deg, #4f46e5 0%, #6d7cff 55%, #818cf8 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #232d54 0%, #312e81 100%)',
   },
   amoled: {
     id: 'amoled',
@@ -68,6 +191,9 @@ export const THEME_PRESETS = {
     bg3: '#181d2b',
     accent: '#7b89ff',
     bubbleOut: '#1c2447',
+    appGradient: 'linear-gradient(180deg, #000000 0%, #04050a 100%)',
+    accentGradient: 'linear-gradient(135deg, #4f46e5 0%, #7b89ff 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #172042 0%, #282566 100%)',
   },
   emerald: {
     id: 'emerald',
@@ -78,6 +204,9 @@ export const THEME_PRESETS = {
     bg3: '#192e27',
     accent: '#10b981',
     bubbleOut: '#11382c',
+    appGradient: 'radial-gradient(circle at 20% 12%, rgba(16, 185, 129, 0.15) 0%, transparent 45%), linear-gradient(180deg, #060c0a 0%, #08120f 100%)',
+    accentGradient: 'linear-gradient(135deg, #059669 0%, #10b981 55%, #2dd4bf 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #064e3b 0%, #115e59 100%)',
   },
   arctic: {
     id: 'arctic',
@@ -88,6 +217,9 @@ export const THEME_PRESETS = {
     bg3: '#192a3e',
     accent: '#06b6d4',
     bubbleOut: '#113647',
+    appGradient: 'radial-gradient(circle at 22% 10%, rgba(6, 182, 212, 0.16) 0%, transparent 46%), linear-gradient(180deg, #060b11 0%, #09121c 100%)',
+    accentGradient: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 55%, #38bdf8 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #0e475e 0%, #155e75 100%)',
   },
   royal: {
     id: 'royal',
@@ -98,6 +230,9 @@ export const THEME_PRESETS = {
     bg3: '#261d40',
     accent: '#a855f7',
     bubbleOut: '#2e1a4a',
+    appGradient: 'radial-gradient(circle at 80% 14%, rgba(168, 85, 247, 0.18) 0%, transparent 48%), linear-gradient(180deg, #0a0712 0%, #100b1d 100%)',
+    accentGradient: 'linear-gradient(135deg, #7e22ce 0%, #a855f7 55%, #ec4899 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #3b1764 0%, #581c87 100%)',
   },
   crimson: {
     id: 'crimson',
@@ -108,6 +243,9 @@ export const THEME_PRESETS = {
     bg3: '#311a24',
     accent: '#f43f5e',
     bubbleOut: '#421826',
+    appGradient: 'radial-gradient(circle at 20% 12%, rgba(244, 63, 94, 0.17) 0%, transparent 46%), linear-gradient(180deg, #0f070a 0%, #160a0f 100%)',
+    accentGradient: 'linear-gradient(135deg, #be123c 0%, #f43f5e 55%, #fb7185 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #4c1424 0%, #881337 100%)',
   },
   amber: {
     id: 'amber',
@@ -118,6 +256,9 @@ export const THEME_PRESETS = {
     bg3: '#2e2311',
     accent: '#f59e0b',
     bubbleOut: '#3b2b10',
+    appGradient: 'radial-gradient(circle at 20% 12%, rgba(245, 158, 11, 0.15) 0%, transparent 46%), linear-gradient(180deg, #0d0a05 0%, #140f07 100%)',
+    accentGradient: 'linear-gradient(135deg, #d97706 0%, #f59e0b 55%, #fbbf24 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #45270d 0%, #78350f 100%)',
   },
   cobalt: {
     id: 'cobalt',
@@ -128,6 +269,9 @@ export const THEME_PRESETS = {
     bg3: '#1b2b48',
     accent: '#3b82f6',
     bubbleOut: '#19325c',
+    appGradient: 'radial-gradient(circle at 20% 14%, rgba(59, 130, 246, 0.16) 0%, transparent 46%), linear-gradient(180deg, #060a13 0%, #0a1120 100%)',
+    accentGradient: 'linear-gradient(135deg, #1d4ed8 0%, #3b82f6 55%, #60a5fa 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #172e57 0%, #1e40af 100%)',
   },
   graphite: {
     id: 'graphite',
@@ -138,6 +282,9 @@ export const THEME_PRESETS = {
     bg3: '#242832',
     accent: '#94a3b8',
     bubbleOut: '#262b38',
+    appGradient: 'linear-gradient(180deg, #0a0b0e 0%, #101218 100%)',
+    accentGradient: 'linear-gradient(135deg, #64748b 0%, #94a3b8 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #242936 0%, #334155 100%)',
   },
   rose: {
     id: 'rose',
@@ -148,25 +295,184 @@ export const THEME_PRESETS = {
     bg3: '#31192d',
     accent: '#ec4899',
     bubbleOut: '#401836',
+    appGradient: 'radial-gradient(circle at 80% 14%, rgba(236, 72, 153, 0.18) 0%, transparent 46%), linear-gradient(180deg, #0e070d 0%, #160a14 100%)',
+    accentGradient: 'linear-gradient(135deg, #db2777 0%, #ec4899 55%, #f472b6 100%)',
+    bubbleGradient: 'linear-gradient(135deg, #501641 0%, #831843 100%)',
   },
 };
 
+// Градиенты исходящих пузырей сообщений
+export const BUBBLE_GRADIENTS = {
+  theme: { id: 'theme', label: 'В тон темы', css: '' },
+  aurora: {
+    id: 'aurora',
+    label: 'Полярное сияние',
+    css: 'linear-gradient(135deg, #0f5156 0%, #1e3a8a 52%, #581c87 100%)',
+  },
+  festive_ruby: {
+    id: 'festive_ruby',
+    label: 'Новогодний рубин',
+    css: 'linear-gradient(135deg, #7f1d1d 0%, #9f1239 54%, #92400e 100%)',
+  },
+  pine_gold: {
+    id: 'pine_gold',
+    label: 'Хвоя и золото',
+    css: 'linear-gradient(135deg, #064e3b 0%, #0f5132 58%, #78350f 100%)',
+  },
+  glacier: {
+    id: 'glacier',
+    label: 'Ледяной кристалл',
+    css: 'linear-gradient(135deg, #0c4a6e 0%, #1d4ed8 54%, #4338ca 100%)',
+  },
+  sunset_berry: {
+    id: 'sunset_berry',
+    label: 'Ягодный закат',
+    css: 'linear-gradient(135deg, #831843 0%, #6d28d9 54%, #1e3a8a 100%)',
+  },
+  warm_amber: {
+    id: 'warm_amber',
+    label: 'Тёплый глинтвейн',
+    css: 'linear-gradient(135deg, #7c2d12 0%, #9a3412 55%, #854d0e 100%)',
+  },
+  solid: {
+    id: 'solid',
+    label: 'Спокойный тон',
+    css: 'solid',
+  },
+};
+
+// Готовые новогодние и градиентные сцены в 1 нажатие
+export const HOLIDAY_MOOD_PACKS = [
+  {
+    id: 'polar_fairytale',
+    title: 'Полярная сказка',
+    sub: 'Северное сияние, кристальные снежинки и гирлянда',
+    patch: {
+      preset: 'ny_polar_aurora',
+      bubbleGradient: 'aurora',
+      ambientEffect: 'aurora_snow',
+      snowDensity: 'medium',
+      garlandEnabled: true,
+      garlandStyle: 'arctic_ice',
+      frostGlass: true,
+      snowCaps: true,
+      chatBackdrop: 'snowflakes',
+      animations: true,
+    },
+  },
+  {
+    id: 'pine_and_gold',
+    title: 'Хвоя и Золото',
+    sub: 'Изумрудная ель, золотые огни и мягкий снег',
+    patch: {
+      preset: 'ny_pine_gold',
+      bubbleGradient: 'pine_gold',
+      ambientEffect: 'snowfall',
+      snowDensity: 'medium',
+      garlandEnabled: true,
+      garlandStyle: 'warm_gold',
+      frostGlass: true,
+      snowCaps: true,
+      chatBackdrop: 'festive_gold',
+      animations: true,
+    },
+  },
+  {
+    id: 'velvet_celebration',
+    title: 'Праздничный Рубин',
+    sub: 'Тёплый бархат, классическая гирлянда и снегопад',
+    patch: {
+      preset: 'ny_velvet_ruby',
+      bubbleGradient: 'festive_ruby',
+      ambientEffect: 'snowfall',
+      snowDensity: 'rich',
+      garlandEnabled: true,
+      garlandStyle: 'classic',
+      frostGlass: true,
+      snowCaps: true,
+      chatBackdrop: 'snowflakes',
+      animations: true,
+    },
+  },
+  {
+    id: 'ice_blizzard',
+    title: 'Ледяной Кристалл',
+    sub: 'Сапфировый иней, метель и морозное стекло',
+    patch: {
+      preset: 'ny_ice_palace',
+      bubbleGradient: 'glacier',
+      ambientEffect: 'blizzard',
+      snowDensity: 'rich',
+      garlandEnabled: true,
+      garlandStyle: 'arctic_ice',
+      frostGlass: true,
+      snowCaps: true,
+      chatBackdrop: 'frost_prism',
+      animations: true,
+    },
+  },
+  {
+    id: 'champagne_sparks',
+    title: 'Искры Шампанского',
+    sub: 'Золотые искры, тёплый камин и янтарный градиент',
+    patch: {
+      preset: 'ny_champagne',
+      bubbleGradient: 'warm_amber',
+      ambientEffect: 'champagne_sparks',
+      snowDensity: 'medium',
+      garlandEnabled: true,
+      garlandStyle: 'warm_gold',
+      frostGlass: true,
+      snowCaps: false,
+      chatBackdrop: 'festive_gold',
+      animations: true,
+    },
+  },
+  {
+    id: 'strict_classic',
+    title: 'Строгая классика',
+    sub: 'Без снежинок и гирлянд, чистый минимализм',
+    patch: {
+      preset: 'obsidian',
+      bubbleGradient: 'solid',
+      ambientEffect: 'none',
+      garlandEnabled: false,
+      frostGlass: false,
+      snowCaps: false,
+      chatBackdrop: 'dots',
+    },
+  },
+];
+
 export const DEFAULT_THEME = {
-  preset: 'obsidian',
-  customAccent: '#6d7cff',
-  customBg0: '#0b0d14',
+  preset: 'ny_polar_aurora',
+  customAccent: '#38bdf8',
+  customBg0: '#060b16',
   customBubble: '',
-  avatarShape: 'squircle', // 'squircle' | 'rounded' | 'circle'
-  bubbleRadius: 16,        // 6 | 12 | 16 | 22
-  chatBackdrop: 'dots',    // 'dots' | 'grid' | 'diag' | 'stars' | 'none'
-  fontScale: 14,           // 12 | 13 | 14 | 15 | 16 | 18
-  fontFamily: 'system',    // 'system' | 'inter' | 'mono'
-  density: 'normal',       // 'compact' | 'normal' | 'spacious'
+  bubbleGradient: 'aurora',  // 'theme' | 'aurora' | 'festive_ruby' | 'pine_gold' | 'glacier' | 'sunset_berry' | 'warm_amber' | 'solid'
+  ambientEffect: 'aurora_snow', // 'snowfall' | 'blizzard' | 'aurora_snow' | 'champagne_sparks' | 'stardust' | 'none'
+  snowDensity: 'medium',     // 'light' | 'medium' | 'rich'
+  garlandEnabled: true,
+  garlandStyle: 'classic',   // 'classic' | 'warm_gold' | 'arctic_ice' | 'cyber_berry'
+  frostGlass: true,
+  snowCaps: true,
+  avatarShape: 'squircle',   // 'squircle' | 'rounded' | 'circle'
+  bubbleRadius: 16,          // 6 | 12 | 16 | 22
+  chatBackdrop: 'snowflakes', // 'snowflakes' | 'aurora_mesh' | 'frost_prism' | 'festive_gold' | 'dots' | 'grid' | 'diag' | 'stars' | 'none'
+  fontScale: 14,             // 12 | 13 | 14 | 15 | 16 | 18
+  fontFamily: 'system',      // 'system' | 'inter' | 'mono'
+  density: 'normal',         // 'compact' | 'normal' | 'spacious'
   animations: true,
   messageTail: true,
+  v18FestiveReady: true,
 };
 
 export const BANNER_PRESETS = {
+  ny_aurora: 'radial-gradient(circle at 25% 20%, #0d9488 0%, transparent 50%), radial-gradient(circle at 80% 25%, #6366f1 0%, transparent 52%), linear-gradient(135deg, #06182c 0%, #0f172a 55%, #2e1065 100%)',
+  ny_pine: 'radial-gradient(circle at 75% 20%, rgba(251, 191, 36, 0.38) 0%, transparent 48%), linear-gradient(135deg, #064e3b 0%, #052e16 55%, #451a03 100%)',
+  ny_ruby: 'radial-gradient(circle at 25% 20%, rgba(251, 191, 36, 0.3) 0%, transparent 45%), linear-gradient(135deg, #881337 0%, #4c0519 58%, #1f0916 100%)',
+  ny_frost: 'radial-gradient(circle at 50% 15%, rgba(125, 211, 252, 0.42) 0%, transparent 52%), linear-gradient(135deg, #0c4a6e 0%, #1e3a8a 55%, #172554 100%)',
+  ny_champagne: 'radial-gradient(circle at 30% 22%, rgba(253, 224, 71, 0.32) 0%, transparent 46%), linear-gradient(135deg, #422006 0%, #3b0764 58%, #09090b 100%)',
   indigo: 'linear-gradient(135deg, #1b2242 0%, #0d1021 60%, #161d38 100%)',
   amoled: 'linear-gradient(180deg, #12141c 0%, #06070a 100%)',
   aurora: 'linear-gradient(135deg, #0f393b 0%, #14192e 55%, #2a1842 100%)',
@@ -394,18 +700,33 @@ export function dismissToast(id) {
   notifyStore();
 }
 
-/** Применяет выбранную тему, цвета, шрифт, плотность и анимации к CSS-переменным документа */
+/** Применяет выбранную тему, градиенты, снежные эффекты, шрифт и плотность к CSS-переменным документа */
 export function applyThemeToDom() {
   if (typeof document === 'undefined' || !document.documentElement) return;
   const t = store.theme;
-  const base = THEME_PRESETS[t.preset] || THEME_PRESETS.obsidian;
+  const base = THEME_PRESETS[t.preset] || THEME_PRESETS.ny_polar_aurora || THEME_PRESETS.obsidian;
   const isCustom = t.preset === 'custom';
-  const accent = isCustom ? (t.customAccent || '#6d7cff') : base.accent;
-  const bg0 = isCustom ? (t.customBg0 || '#0b0d14') : base.bg0;
+  const accent = isCustom ? (t.customAccent || '#38bdf8') : base.accent;
+  const bg0 = isCustom ? (t.customBg0 || '#060b16') : base.bg0;
   const bg1 = isCustom ? liftHex(bg0, 8) : base.bg1;
   const bg2 = isCustom ? liftHex(bg0, 16) : base.bg2;
   const bg3 = isCustom ? liftHex(bg0, 26) : base.bg3;
-  const bubbleOut = t.customBubble || (isCustom ? hexToRgba(accent, 0.28) : base.bubbleOut);
+  const bubbleSolid = t.customBubble || (isCustom ? hexToRgba(accent, 0.28) : base.bubbleOut);
+
+  const appGradient = isCustom
+    ? `radial-gradient(circle at 20% 12%, ${hexToRgba(accent, 0.22)} 0%, transparent 48%), linear-gradient(180deg, ${bg0} 0%, ${bg1} 100%)`
+    : (base.appGradient || `linear-gradient(180deg, ${bg0} 0%, ${bg1} 100%)`);
+
+  const accentGradient = isCustom
+    ? `linear-gradient(135deg, ${accent} 0%, ${liftHex(accent, 34)} 100%)`
+    : (base.accentGradient || `linear-gradient(135deg, ${accent} 0%, ${liftHex(accent, 28)} 100%)`);
+
+  const chosenBubbleGrad = BUBBLE_GRADIENTS[t.bubbleGradient];
+  const bubbleOutBg = t.customBubble
+    ? t.customBubble
+    : chosenBubbleGrad?.css === 'solid'
+      ? bubbleSolid
+      : (chosenBubbleGrad?.css || base.bubbleGradient || bubbleSolid);
 
   const fontStack =
     t.fontFamily === 'mono'
@@ -425,18 +746,26 @@ export function applyThemeToDom() {
   root.setProperty('--accent', accent);
   root.setProperty('--accent-hover', accent);
   root.setProperty('--accent-soft', hexToRgba(accent, 0.16));
-  root.setProperty('--accent-glow', hexToRgba(accent, 0.34));
-  root.setProperty('--bubble-out', bubbleOut);
+  root.setProperty('--accent-glow', hexToRgba(accent, 0.36));
+  root.setProperty('--bubble-out', bubbleSolid);
+  root.setProperty('--bubble-out-bg', bubbleOutBg);
+  root.setProperty('--app-bg-gradient', appGradient);
+  root.setProperty('--accent-gradient', accentGradient);
   root.setProperty('--avatar-radius', avatarRad);
   root.setProperty('--bubble-radius', `${Number(t.bubbleRadius) || 16}px`);
   root.setProperty('--msg-font-size', `${Number(t.fontScale) || 14}px`);
   root.setProperty('--font-ui', fontStack);
 
   const ds = document.documentElement.dataset;
-  ds.backdrop = t.chatBackdrop || 'dots';
-  ds.density = t.density || 'normal';
-  ds.motion = t.animations === false ? 'reduced' : 'full';
-  ds.tails = t.messageTail === false ? 'off' : 'on';
+  if (ds) {
+    ds.backdrop = t.chatBackdrop || 'snowflakes';
+    ds.density = t.density || 'normal';
+    ds.motion = t.animations === false ? 'reduced' : 'full';
+    ds.tails = t.messageTail === false ? 'off' : 'on';
+    ds.frost = t.frostGlass === false ? 'off' : 'on';
+    ds.snowcaps = t.snowCaps ? 'on' : 'off';
+    ds.garland = t.garlandEnabled ? 'on' : 'off';
+  }
 
   const metaTheme = document.querySelector?.('meta[name="theme-color"]');
   if (metaTheme) metaTheme.setAttribute('content', bg0);
@@ -903,7 +1232,29 @@ export async function bootClientApp() {
       clientDb.get('profile', null),
     ]);
     if (savedSettings) Object.assign(store.settings, savedSettings);
-    if (savedTheme) Object.assign(store.theme, savedTheme);
+    if (savedTheme) {
+      Object.assign(store.theme, savedTheme);
+      // Однократная активация зимней атмосферы и градиентов при обновлении до v1.8
+      if (!savedTheme.v18FestiveReady) {
+        if (!savedTheme.preset || savedTheme.preset === 'obsidian') {
+          store.theme.preset = 'ny_polar_aurora';
+          store.theme.customAccent = '#38bdf8';
+          store.theme.customBg0 = '#060b16';
+          store.theme.bubbleGradient = 'aurora';
+        }
+        if (!savedTheme.chatBackdrop || savedTheme.chatBackdrop === 'dots') {
+          store.theme.chatBackdrop = 'snowflakes';
+        }
+        store.theme.ambientEffect = 'aurora_snow';
+        store.theme.snowDensity = 'medium';
+        store.theme.garlandEnabled = true;
+        store.theme.garlandStyle = 'classic';
+        store.theme.frostGlass = true;
+        store.theme.snowCaps = true;
+        store.theme.v18FestiveReady = true;
+        await clientDb.set('theme', store.theme).catch(() => {});
+      }
+    }
     if (savedProfile) Object.assign(store.profile, savedProfile);
 
     await cryptoWorker.call('setCryptoConfig', {
@@ -1961,10 +2312,27 @@ export async function updateMyProfile(patch) {
 }
 
 export async function updateThemeSettings(patch) {
-  Object.assign(store.theme, patch);
+  Object.assign(store.theme, patch, { v18FestiveReady: true });
   applyThemeToDom();
   triggerHaptic('tap');
   await clientDb.set('theme', store.theme);
+  notifyStore();
+}
+
+export async function applyHolidayMoodPack(packId) {
+  const found = HOLIDAY_MOOD_PACKS.find((p) => p.id === packId);
+  if (!found) return;
+  const presetObj = THEME_PRESETS[found.patch.preset];
+  Object.assign(store.theme, found.patch, {
+    customAccent: presetObj?.accent || store.theme.customAccent,
+    customBg0: presetObj?.bg0 || store.theme.customBg0,
+    customBubble: '',
+    v18FestiveReady: true,
+  });
+  applyThemeToDom();
+  triggerHaptic('heavy');
+  await clientDb.set('theme', store.theme);
+  showToast(`Сцена применена: ${found.title}`);
   notifyStore();
 }
 

@@ -26,6 +26,7 @@ import { ProfileView, ContactsView } from './profile-view.mjs';
 import { SettingsScreen, PinLockOverlay } from './settings-screen.mjs';
 import { ModalLayer } from './settings-modal.mjs';
 import { BossScreen, Icon } from './boss-screen.mjs';
+import { AtmosphereLayer } from './atmosphere-layer.mjs';
 
 const NAV_ITEMS = [
   { id: 'chats', label: 'Чаты', icon: 'chat' },
@@ -89,6 +90,7 @@ function AuthScreen() {
   };
 
   return html`<div class="auth-backdrop">
+    <${AtmosphereLayer} />
     <div class="auth-card">
       <${UpdateBanner} update=${update} />
 
@@ -111,6 +113,13 @@ function AuthScreen() {
           </div>
           <span>X3DH · Double Ratchet · Sealed Sender · Постоянная ZK-сессия</span>
         </div>
+        <button
+          type="button"
+          class="square-action-btn festive-trigger-btn"
+          style="margin-left:auto"
+          title="Новогодняя атмосфера, снежинки и градиенты"
+          onClick=${() => { store.ui.modal = 'atmosphere'; store.ui.modalData = null; store.busy = store.busy; updateClientSettings({}); }}
+        ><${Icon} name="snowflake" size=${17} /></button>
       </div>
 
       <div class="auth-tabs">
@@ -242,11 +251,17 @@ export function AppRoot() {
   }
 
   if (!s.me) {
-    return html`<${AuthScreen} />`;
+    return html`<div>
+      <${AuthScreen} />
+      <${ModalLayer} />
+    </div>`;
   }
 
   if (s.ui.pinLocked && s.settings.pinHashB64) {
-    return html`<${PinLockOverlay} />`;
+    return html`<div>
+      <${AtmosphereLayer} />
+      <${PinLockOverlay} />
+    </div>`;
   }
 
   const totalUnread = Object.values(s.chats).reduce((sum, c) => sum + (c.unread || 0), 0);
@@ -254,6 +269,7 @@ export function AppRoot() {
   const hideBottomNavOnMobile = navTab === 'chats' && Boolean(s.ui.activeChatId);
 
   return html`<div class="app-shell">
+    <${AtmosphereLayer} />
     <div class=${`app-window ${hideBottomNavOnMobile ? 'chat-open-mobile' : ''}`}>
       <!-- Боковая навигационная рейка для ПК / планшетов -->
       <nav class="desktop-nav-rail" aria-label="Разделы">

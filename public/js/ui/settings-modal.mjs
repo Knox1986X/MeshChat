@@ -9,10 +9,14 @@ import { TRANSPORT_POLICY } from '../transport/transport-interface.mjs';
 import {
   store,
   APP_VERSION,
+  BUBBLE_GRADIENTS,
+  HOLIDAY_MOOD_PACKS,
   notifyStore,
   startChatWithUsername,
   markPeerVerified,
   updateClientSettings,
+  updateThemeSettings,
+  applyHolidayMoodPack,
   toggleAndroidLanMesh,
   toggleScreenshotProtection,
   checkForUpdates,
@@ -122,6 +126,9 @@ export function ModalLayer() {
   if (ui.modal === 'new-chat') {
     return html`<${NewChatModal} />`;
   }
+  if (ui.modal === 'atmosphere') {
+    return html`<${AtmosphereQuickModal} />`;
+  }
   if (ui.modal === 'qr') {
     return html`<${QrIdentityModal} initialTab=${ui.modalData?.tab || 'contact'} />`;
   }
@@ -152,6 +159,115 @@ export function ModalLayer() {
   }
 
   return null;
+}
+
+// ─────────────────────── Быстрая студия новогодней атмосферы, снежинок и градиентов ───────────────────────
+
+function AtmosphereQuickModal() {
+  const { theme } = store;
+
+  return html`<div class="modal-backdrop" onClick=${closeModal}>
+    <div class="modal-card wide festive-modal-card" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal-head">
+        <h3><${Icon} name="snowflake" size=${18} /> Атмосфера, снежинки и градиенты</h3>
+        <button type="button" class="icon-btn" onClick=${closeModal}><${Icon} name="close" /></button>
+      </div>
+
+      <label class="field-label">Готовые новогодние и зимние сцены в 1 нажатие</label>
+      <div class="mood-packs-grid">
+        ${HOLIDAY_MOOD_PACKS.map((pack) => html`<button
+          key=${pack.id}
+          type="button"
+          class=${`mood-pack-tile ${theme.preset === pack.patch.preset && theme.ambientEffect === pack.patch.ambientEffect ? 'active' : ''}`}
+          onClick=${() => applyHolidayMoodPack(pack.id)}
+        >
+          <b>${pack.title}</b>
+          <span>${pack.sub}</span>
+        </button>`)}
+      </div>
+
+      <label class="field-label">Снегопад и небесные эффекты</label>
+      <div class="chip-grid">
+        ${[
+          ['aurora_snow', 'Сияние + Снег'],
+          ['snowfall', 'Кристальный снег'],
+          ['blizzard', 'Зимняя метель'],
+          ['champagne_sparks', 'Золотые искры'],
+          ['stardust', 'Звёздная ночь'],
+          ['none', 'Выключено'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(theme.ambientEffect || 'aurora_snow') === id ? 'active' : ''}`}
+          onClick=${() => updateThemeSettings({ ambientEffect: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      ${theme.ambientEffect !== 'none' && html`<div>
+        <label class="field-label">Интенсивность снежинок и частиц</label>
+        <div class="chip-grid">
+          ${[
+            ['light', 'Лёгкий иней'],
+            ['medium', 'Средний снегопад'],
+            ['rich', 'Пышный снегопад'],
+          ].map(([id, lbl]) => html`<button
+            key=${id}
+            type="button"
+            class=${`choice-chip ${(theme.snowDensity || 'medium') === id ? 'active' : ''}`}
+            onClick=${() => updateThemeSettings({ snowDensity: id })}
+          >${lbl}</button>`)}
+        </div>
+      </div>`}
+
+      <label class="field-label">Новогодняя светящаяся гирлянда</label>
+      <div class="chip-grid">
+        <button
+          type="button"
+          class=${`choice-chip ${!theme.garlandEnabled ? 'active' : ''}`}
+          onClick=${() => updateThemeSettings({ garlandEnabled: false })}
+        >Выкл</button>
+        ${[
+          ['classic', 'Праздничная классика'],
+          ['warm_gold', 'Тёплое золото'],
+          ['arctic_ice', 'Арктический лёд'],
+          ['cyber_berry', 'Неоновый свет'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${theme.garlandEnabled && (theme.garlandStyle || 'classic') === id ? 'active' : ''}`}
+          onClick=${() => updateThemeSettings({ garlandEnabled: true, garlandStyle: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Градиент исходящих сообщений</label>
+      <div class="chip-grid">
+        ${Object.values(BUBBLE_GRADIENTS).map((bg) => html`<button
+          key=${bg.id}
+          type="button"
+          class=${`choice-chip ${(theme.bubbleGradient || 'aurora') === bg.id ? 'active' : ''}`}
+          onClick=${() => updateThemeSettings({ bubbleGradient: bg.id, customBubble: '' })}
+        >
+          ${bg.css && bg.css !== 'solid' && html`<i class="mini-grad-dot" style=${`background:${bg.css}`}></i>`}
+          <span>${bg.label}</span>
+        </button>`)}
+      </div>
+
+      <div class="settings-toggles" style="margin-top:8px">
+        <div class="insp-row" onClick=${() => updateThemeSettings({ snowCaps: !theme.snowCaps })}>
+          <span class="insp-label">Снежная кромка на карточках и кнопках</span>
+          <span class=${`ios-switch ${theme.snowCaps ? 'on' : ''}`}><i></i></span>
+        </div>
+        <div class="insp-row" onClick=${() => updateThemeSettings({ frostGlass: theme.frostGlass === false })}>
+          <span class="insp-label">Морозное стекло (полупрозрачные панели с размытием)</span>
+          <span class=${`ios-switch ${theme.frostGlass !== false ? 'on' : ''}`}><i></i></span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn-primary" onClick=${closeModal}>Готово</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 // ─────────────────────── Живой голосовой E2EE вызов WebRTC (DTLS-SRTP) ───────────────────────

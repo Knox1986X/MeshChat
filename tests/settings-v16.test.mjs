@@ -70,8 +70,9 @@ test('Крипто-паддинг v1.6: выравнивание ISO/IEC 7816-4 
 });
 
 test('Локальный PIN-код и зашифрованный бэкап (PBKDF2 210k + AES-256-GCM)', async () => {
-  assert.equal(Object.keys(THEME_PRESETS).length, 10);
+  assert.equal(Object.keys(THEME_PRESETS).length, 18);
   assert.equal(THEME_PRESETS.amoled.bg0, '#000000');
+  assert.ok(THEME_PRESETS.ny_polar_aurora.accentGradient.includes('linear-gradient'));
   assert.equal(DEFAULT_SETTINGS.paddingBlockBytes, 512);
 
   const sampleTs = Date.UTC(2026, 10, 13, 14, 5, 9);

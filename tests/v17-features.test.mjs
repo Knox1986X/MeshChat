@@ -199,9 +199,22 @@ test('E2eeCallManager проводит полный цикл зашифрова�
   }
 });
 
-test('Версия v1.7.0 (build 8) и жизненно важные действия чата (редактирование, удаление, очистка)', async () => {
-  assert.equal(storeMod.APP_VERSION, '1.7.0');
-  assert.equal(storeMod.APP_VERSION_CODE, 8);
+test('Версия v1.8.0 (build 9), новогодние сцены, градиенты и действия чата', async () => {
+  assert.equal(storeMod.APP_VERSION, '1.8.0');
+  assert.equal(storeMod.APP_VERSION_CODE, 9);
+  assert.equal(Object.keys(storeMod.THEME_PRESETS).length, 18);
+  assert.equal(storeMod.HOLIDAY_MOOD_PACKS.length, 6);
+  assert.ok(Object.keys(storeMod.BUBBLE_GRADIENTS).length >= 8);
+
+  await storeMod.applyHolidayMoodPack('pine_and_gold');
+  assert.equal(storeMod.store.theme.preset, 'ny_pine_gold');
+  assert.equal(storeMod.store.theme.ambientEffect, 'snowfall');
+  assert.equal(storeMod.store.theme.garlandEnabled, true);
+  assert.equal(storeMod.store.theme.garlandStyle, 'warm_gold');
+
+  await storeMod.applyHolidayMoodPack('polar_fairytale');
+  assert.equal(storeMod.store.theme.preset, 'ny_polar_aurora');
+  assert.equal(storeMod.store.theme.ambientEffect, 'aurora_snow');
 
   const chatId = 'dm:testpeer';
   storeMod.store.chats[chatId] = {
@@ -239,11 +252,15 @@ test('Версия v1.7.0 (build 8) и жизненно важные дейст�
   assert.equal(storeMod.store.chats[chatId], undefined);
 });
 
-test('Service Worker и Android MainActivity содержат полную реализацию мостов без заглушек', () => {
+test('Service Worker, атмосферный слой и Android MainActivity содержат полную реализацию', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const sw = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8');
-  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v8'"));
+  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v9'"));
   assert.ok(sw.includes("url.pathname.startsWith('/api/')"));
+
+  const atmo = fs.readFileSync(path.join(root, 'public/js/ui/atmosphere-layer.mjs'), 'utf8');
+  assert.ok(atmo.includes('drawCrystalSnowflake'));
+  assert.ok(atmo.includes('FestiveGarland'));
 
   const java = fs.readFileSync(path.join(root, 'android/src/org/meshchat/app/MainActivity.java'), 'utf8');
   assert.ok(java.includes('saveBase64Document'));
@@ -253,6 +270,6 @@ test('Service Worker и Android MainActivity содержат полную ре�
 
   const manifest = fs.readFileSync(path.join(root, 'android/AndroidManifest.xml'), 'utf8');
   assert.ok(manifest.includes('package="io.meshchat.app"'));
-  assert.ok(manifest.includes('android:versionCode="8"'));
-  assert.ok(manifest.includes('android:versionName="1.7.0"'));
+  assert.ok(manifest.includes('android:versionCode="9"'));
+  assert.ok(manifest.includes('android:versionName="1.8.0"'));
 });

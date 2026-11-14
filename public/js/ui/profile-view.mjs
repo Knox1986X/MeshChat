@@ -28,6 +28,9 @@ import { ThemeStudioCard, SettingsScreen } from './settings-screen.mjs';
 export { ThemeStudioCard, SettingsScreen };
 
 const BADGE_OPTIONS = [
+  { id: 'snowflake', label: 'Зимний кристалл' },
+  { id: 'tree', label: 'Новогодняя ель' },
+  { id: 'sparkle', label: 'Полярное сияние' },
   { id: 'verified', label: 'Щит E2E' },
   { id: 'star', label: 'Звезда' },
   { id: 'bolt', label: 'Импульс' },

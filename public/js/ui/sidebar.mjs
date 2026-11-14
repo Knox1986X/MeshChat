@@ -160,6 +160,13 @@ export function Sidebar() {
       <div class="chats-hero-actions">
         <button
           type="button"
+          class="square-action-btn festive-trigger-btn"
+          title="Новогодняя атмосфера, снежинки и градиенты"
+          onClick=${() => { store.ui.modal = 'atmosphere'; notifyStore(); }}
+        ><${Icon} name="snowflake" size=${18} /></button>
+
+        <button
+          type="button"
           class="square-action-btn"
           title="Моя QR-визитка и быстрый обмен"
           onClick=${() => { store.ui.modal = 'qr'; notifyStore(); }}

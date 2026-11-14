@@ -10,7 +10,10 @@ import {
   APP_VERSION_CODE,
   DEFAULT_CLOUD_URL,
   THEME_PRESETS,
+  BUBBLE_GRADIENTS,
+  HOLIDAY_MOOD_PACKS,
   updateThemeSettings,
+  applyHolidayMoodPack,
   resetThemeSettings,
   updateClientSettings,
   toggleScreenshotProtection,
@@ -176,7 +179,20 @@ export function ThemeStudioCard({ onClose = null }) {
       </div>
     </div>
 
-    <label class="field-label">Цветовая палитра интерфейса (10 тем)</label>
+    <label class="field-label">Новогодние и зимние сцены в 1 нажатие</label>
+    <div class="mood-packs-grid">
+      ${HOLIDAY_MOOD_PACKS.map((pack) => html`<button
+        key=${pack.id}
+        type="button"
+        class=${`mood-pack-tile ${theme.preset === pack.patch.preset && theme.ambientEffect === pack.patch.ambientEffect ? 'active' : ''}`}
+        onClick=${() => applyHolidayMoodPack(pack.id)}
+      >
+        <b>${pack.title}</b>
+        <span>${pack.sub}</span>
+      </button>`)}
+    </div>
+
+    <label class="field-label">Цветовые и градиентные темы (${Object.keys(THEME_PRESETS).length} палитр)</label>
     <div class="theme-presets-grid">
       ${Object.values(THEME_PRESETS).map((p) => html`<button
         key=${p.id}
@@ -184,10 +200,72 @@ export function ThemeStudioCard({ onClose = null }) {
         class=${`theme-preset-tile ${theme.preset === p.id ? 'active' : ''}`}
         onClick=${() => updateThemeSettings({ preset: p.id, customAccent: p.accent, customBg0: p.bg0 })}
       >
-        <span class="preset-preview" style=${`background:${p.bg0};border-color:${p.accent}`}>
-          <i style=${`background:${p.accent}`}></i>
+        <span class="preset-preview" style=${`background:${p.appGradient || p.bg0};border-color:${p.accent}`}>
+          <i style=${`background:${p.accentGradient || p.accent}`}></i>
         </span>
         <span>${p.label}</span>
+      </button>`)}
+    </div>
+
+    <label class="field-label">Снежинки, полярное сияние и новогодняя гирлянда</label>
+    <div class="chip-grid">
+      ${[
+        ['aurora_snow', 'Сияние + Снег'],
+        ['snowfall', 'Кристальный снег'],
+        ['blizzard', 'Зимняя метель'],
+        ['champagne_sparks', 'Золотые искры'],
+        ['stardust', 'Звёздная ночь'],
+        ['none', 'Без частиц'],
+      ].map(([id, lbl]) => html`<button
+        key=${id}
+        type="button"
+        class=${`choice-chip ${(theme.ambientEffect || 'aurora_snow') === id ? 'active' : ''}`}
+        onClick=${() => updateThemeSettings({ ambientEffect: id })}
+      >${lbl}</button>`)}
+    </div>
+
+    ${theme.ambientEffect !== 'none' && html`<div class="chip-grid">
+      ${[
+        ['light', 'Лёгкий снег'],
+        ['medium', 'Средний снег'],
+        ['rich', 'Пышный снегопад'],
+      ].map(([id, lbl]) => html`<button
+        key=${id}
+        type="button"
+        class=${`choice-chip ${(theme.snowDensity || 'medium') === id ? 'active' : ''}`}
+        onClick=${() => updateThemeSettings({ snowDensity: id })}
+      >${lbl}</button>`)}
+    </div>`}
+
+    <div class="chip-grid">
+      <button
+        type="button"
+        class=${`choice-chip ${!theme.garlandEnabled ? 'active' : ''}`}
+        onClick=${() => updateThemeSettings({ garlandEnabled: false })}
+      >Гирлянда: Выкл</button>
+      ${[
+        ['classic', 'Гирлянда: Классика'],
+        ['warm_gold', 'Гирлянда: Золото'],
+        ['arctic_ice', 'Гирлянда: Арктика'],
+        ['cyber_berry', 'Гирлянда: Неон'],
+      ].map(([id, lbl]) => html`<button
+        key=${id}
+        type="button"
+        class=${`choice-chip ${theme.garlandEnabled && (theme.garlandStyle || 'classic') === id ? 'active' : ''}`}
+        onClick=${() => updateThemeSettings({ garlandEnabled: true, garlandStyle: id })}
+      >${lbl}</button>`)}
+    </div>
+
+    <label class="field-label">Градиент пузырей исходящих сообщений</label>
+    <div class="chip-grid">
+      ${Object.values(BUBBLE_GRADIENTS).map((bg) => html`<button
+        key=${bg.id}
+        type="button"
+        class=${`choice-chip ${(theme.bubbleGradient || 'aurora') === bg.id ? 'active' : ''}`}
+        onClick=${() => updateThemeSettings({ bubbleGradient: bg.id, customBubble: '' })}
+      >
+        ${bg.css && bg.css !== 'solid' && html`<i class="mini-grad-dot" style=${`background:${bg.css}`}></i>`}
+        <span>${bg.label}</span>
       </button>`)}
     </div>
 
@@ -292,9 +370,13 @@ export function ThemeStudioCard({ onClose = null }) {
       >${lbl}</button>`)}
     </div>
 
-    <label class="field-label">Узор фона ленты диалогов</label>
+    <label class="field-label">Узор и атмосфера фона ленты диалогов</label>
     <div class="chip-grid">
       ${[
+        ['snowflakes', 'Узор снежинок'],
+        ['aurora_mesh', 'Полярное сияние'],
+        ['frost_prism', 'Морозные грани'],
+        ['festive_gold', 'Праздничные огни'],
         ['dots', 'Точечная матрица'],
         ['grid', 'Инженерная сетка'],
         ['diag', 'Диагональ'],
@@ -309,6 +391,22 @@ export function ThemeStudioCard({ onClose = null }) {
     </div>
 
     <div class="settings-rows-list" style="margin-top:6px">
+      <div class="settings-switch-row" onClick=${() => updateThemeSettings({ frostGlass: theme.frostGlass === false })}>
+        <div class="plugin-copy">
+          <div class="plugin-title">Эффект морозного стекла (Glassmorphism)</div>
+          <div class="plugin-sub">Полупрозрачные карточки и заголовки с мягким ледяным бликом по контуру</div>
+        </div>
+        <button type="button" class=${`ios-switch ${theme.frostGlass !== false ? 'on' : ''}`}><span></span></button>
+      </div>
+
+      <div class="settings-switch-row" onClick=${() => updateThemeSettings({ snowCaps: !theme.snowCaps })}>
+        <div class="plugin-copy">
+          <div class="plugin-title">Снежные шапки на элементах интерфейса</div>
+          <div class="plugin-sub">Деликатная снежная кромка поверх пузырей сообщений, модальных окон и кнопок</div>
+        </div>
+        <button type="button" class=${`ios-switch ${theme.snowCaps ? 'on' : ''}`}><span></span></button>
+      </div>
+
       <div class="settings-switch-row" onClick=${() => updateThemeSettings({ messageTail: theme.messageTail === false })}>
         <div class="plugin-copy">
           <div class="plugin-title">Хвостики у пузырей сообщений</div>
@@ -461,7 +559,7 @@ export function SettingsScreen() {
       <!-- 1. ОФОРМЛЕНИЕ, ТЕМЫ И ТИПОГРАФИКА -->
       ${showSection(
         'appearance',
-        'оформление тема цвета палитра amoled шрифт размер текст плотность компактно аватар скругление пузыри узор сетка анимации хвостики'
+        'оформление тема цвета палитра градиент новый год зима снежинки снегопад метель гирлянда сияние мороз стекло amoled шрифт размер текст плотность компактно аватар скругление пузыри узор сетка анимации хвостики'
       ) && html`<${ThemeStudioCard} />`}
 
       <!-- 2. ЧАТЫ, ВВОД И ПОВЕДЕНИЕ МЕДИА -->

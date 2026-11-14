@@ -269,6 +269,9 @@ const ICON_PATHS = {
   phoneOff: html`<path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" y1="2" x2="2" y2="22"/>`,
   play: html`<polygon points="6 4 20 12 6 20 6 4" fill="currentColor"/>`,
   pause: html`<rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/>`,
+  snowflake: html`<line x1="12" y1="2" x2="12" y2="22"/><line x1="3.34" y1="7" x2="20.66" y2="17"/><line x1="20.66" y1="7" x2="3.34" y2="17"/><polyline points="9.5 4.5 12 7 14.5 4.5"/><polyline points="9.5 19.5 12 17 14.5 19.5"/><polyline points="4.5 10.2 7.5 9.4 6.7 6.4"/><polyline points="17.3 17.6 16.5 14.6 19.5 13.8"/><polyline points="19.5 10.2 16.5 9.4 17.3 6.4"/><polyline points="6.7 17.6 7.5 14.6 4.5 13.8"/>`,
+  sparkle: html`<path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="m19 16 .9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16Z"/>`,
+  tree: html`<polygon points="12 2 6.5 9.5 10 9.5 5 15.5 9.2 15.5 4 20.5 20 20.5 14.8 15.5 19 15.5 14 9.5 17.5 9.5 12 2"/><line x1="12" y1="20.5" x2="12" y2="23"/>`,
   mesh: html`<path d="M12 3 4 7v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10V7l-8-4Z"/><circle cx="12" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/><circle cx="9.6" cy="15.2" r="1.3" fill="currentColor"/><circle cx="14.4" cy="15.2" r="1.3" fill="currentColor"/><path d="M8.5 11 12 8.5 15.5 11 14.4 15.2H9.6L8.5 11Z" stroke-width="1.3"/>`,
 };
 
@@ -315,6 +318,9 @@ export function ProfileBadgeIcon({ badge, size = 14 }) {
   if (!badge || badge === 'none') return null;
   const map = {
     verified: { icon: 'shield', cls: 'badge-verified', title: 'Подтверждённый E2EE профиль' },
+    snowflake: { icon: 'snowflake', cls: 'badge-snowflake', title: 'Зимний кристалл' },
+    tree: { icon: 'tree', cls: 'badge-tree', title: 'Новогодняя коллекция' },
+    sparkle: { icon: 'sparkle', cls: 'badge-sparkle', title: 'Полярное сияние' },
     star: { icon: 'star', cls: 'badge-star', title: 'Избранный статус' },
     bolt: { icon: 'bolt', cls: 'badge-bolt', title: 'Активный узел Mesh' },
     shield: { icon: 'lock', cls: 'badge-shield', title: 'Защищённый контур' },

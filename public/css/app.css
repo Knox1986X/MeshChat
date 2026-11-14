@@ -16,11 +16,14 @@
   --bg-elevated-2: var(--bg-3);
   --bg-hover: rgba(148, 163, 184, 0.09);
 
-  --accent: #6d7cff;
-  --accent-hover: #5b6bf7;
-  --accent-soft: rgba(109, 124, 255, 0.16);
-  --accent-glow: rgba(109, 124, 255, 0.34);
-  --bubble-out: #263159;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --accent-soft: rgba(56, 189, 248, 0.16);
+  --accent-glow: rgba(56, 189, 248, 0.36);
+  --bubble-out: #16355c;
+  --bubble-out-bg: linear-gradient(135deg, #0f5156 0%, #1e3a8a 52%, #581c87 100%);
+  --app-bg-gradient: radial-gradient(circle at 16% 12%, rgba(16, 185, 129, 0.16) 0%, transparent 44%), radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.2) 0%, transparent 48%), linear-gradient(180deg, #060b16 0%, #091224 100%);
+  --accent-gradient: linear-gradient(135deg, #0ea5e9 0%, #6366f1 52%, #a855f7 100%);
 
   --accent-blue: var(--accent);
   --accent-blue-strong: var(--accent-hover);
@@ -3205,5 +3208,271 @@ html[data-tails="off"] .preview-bubble-out {
     min-height: 32px;
   }
 }
+
+/* ─────────────────── MeshChat v1.8: Новогодняя атмосфера, гирлянды и мультиградиенты ─────────────────── */
+
+html, body, #app, .app-shell, .auth-backdrop {
+  background: var(--app-bg-gradient, var(--bg-0));
+}
+
+/* Многослойный фоновый градиент панелей при включённом морозном стекле */
+html[data-frost="on"] .sidebar,
+html[data-frost="on"] .inspector-pane,
+html[data-frost="on"] .desktop-nav-rail {
+  background: linear-gradient(180deg, rgba(10, 16, 30, 0.76) 0%, rgba(7, 11, 22, 0.84) 100%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+html[data-frost="on"] .workspace-single {
+  background: transparent;
+}
+html[data-frost="on"] .chat-header,
+html[data-frost="on"] .composer-bar,
+html[data-frost="on"] .mobile-bottom-nav {
+  background: rgba(12, 18, 34, 0.78);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+html[data-frost="on"] .studio-card,
+html[data-frost="on"] .modal-card,
+html[data-frost="on"] .auth-card,
+html[data-frost="on"] .profile-info-group {
+  background: linear-gradient(165deg, rgba(24, 34, 58, 0.78) 0%, rgba(12, 17, 31, 0.88) 100%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-color: rgba(186, 230, 253, 0.16);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+/* Богатые мультиградиенты на акцентных кнопках, фильтрах, пузырях и счётчиках */
+.btn-primary,
+.compose-fab,
+.composer-send:not(.mic-btn),
+.voice-play-btn,
+.filter-pill.active,
+.cat-pill-btn.active,
+.unread-pill,
+.btn-update-now {
+  background: var(--accent-gradient, var(--accent));
+  border-color: transparent;
+  box-shadow: 0 6px 20px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+.auth-logo,
+.rail-brand {
+  background: var(--accent-gradient, var(--accent-soft));
+  color: #ffffff;
+  box-shadow: 0 6px 20px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+/* Мультиградиентные исходящие пузыри сообщений */
+.msg-bubble.bubble-out,
+.preview-bubble-out {
+  background: var(--bubble-out-bg, var(--bubble-out));
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+/* Кнопка быстрого вызова зимней атмосферы ❄ */
+.festive-trigger-btn {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.18) 0%, rgba(168, 85, 247, 0.2) 100%);
+  border-color: rgba(125, 211, 252, 0.36);
+  color: #7dd3fc;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.18);
+}
+.festive-trigger-btn:hover {
+  color: #ffffff;
+  border-color: #38bdf8;
+  box-shadow: 0 0 22px rgba(56, 189, 248, 0.36);
+}
+
+/* Атмосферный слой снежинок и новогодней гирлянды */
+.atmosphere-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 42;
+  overflow: hidden;
+}
+.atmosphere-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Светящаяся новогодняя гирлянда вдоль верхнего края */
+.festive-garland-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  pointer-events: none;
+  z-index: 44;
+}
+.festive-garland-wire {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 28px;
+}
+.festive-bulbs-row {
+  position: relative;
+  width: 100%;
+  height: 34px;
+}
+.garland-bulb {
+  position: absolute;
+  transform: translateX(-50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  animation: garlandTwinkle 2.4s infinite ease-in-out alternate;
+}
+.garland-bulb .bulb-cap {
+  width: 4px;
+  height: 3px;
+  border-radius: 1px;
+  background: #475569;
+  display: block;
+}
+.garland-bulb .bulb-glass {
+  width: 7px;
+  height: 10px;
+  border-radius: 50% 50% 58% 58%;
+  background: radial-gradient(circle at 38% 32%, #ffffff 0%, var(--bulb-color) 58%);
+  box-shadow: 0 0 10px var(--bulb-color), 0 0 22px var(--bulb-color);
+  display: block;
+}
+@keyframes garlandTwinkle {
+  0% { opacity: 0.58; filter: brightness(0.88); transform: translateX(-50%) scale(0.94); }
+  100% { opacity: 1; filter: brightness(1.22); transform: translateX(-50%) scale(1.08); }
+}
+
+html[data-garland="on"] .chats-hero-header,
+html[data-garland="on"] .screen-hero-head {
+  padding-top: 24px;
+}
+html[data-garland="on"] .chat-header {
+  padding-top: 18px;
+}
+
+/* Деликатные снежные шапки на карточках, пузырях и кнопках */
+html[data-snowcaps="on"] .modal-card,
+html[data-snowcaps="on"] .auth-card,
+html[data-snowcaps="on"] .studio-card {
+  border-top: 2px solid rgba(241, 245, 249, 0.55);
+  box-shadow: 0 -3px 12px rgba(224, 242, 254, 0.12), 0 18px 44px rgba(0, 0, 0, 0.48);
+}
+html[data-snowcaps="on"] .msg-bubble {
+  border-top: 1.5px solid rgba(241, 245, 249, 0.36);
+}
+html[data-snowcaps="on"] .compose-fab {
+  box-shadow: 0 -2px 0 rgba(255, 255, 255, 0.72), 0 10px 26px var(--accent-glow);
+}
+
+/* Плитки готовых новогодних и градиентных сцен */
+.mood-packs-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+.mood-pack-tile {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(145deg, rgba(30, 41, 68, 0.55) 0%, rgba(15, 23, 42, 0.65) 100%);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+  flex-shrink: 0;
+}
+.mood-pack-tile:hover {
+  border-color: rgba(125, 211, 252, 0.42);
+  transform: translateY(-1px);
+}
+.mood-pack-tile.active {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--accent-soft) 0%, rgba(99, 102, 241, 0.18) 100%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.mood-pack-tile b {
+  font-size: 12.8px;
+  color: var(--text-main);
+}
+.mood-pack-tile span {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.32;
+}
+.mini-grad-dot {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -2px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+/* Новые значки профиля (Снежинка, Новогодняя ель, Полярное сияние) */
+.profile-badge-chip.badge-snowflake {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(129, 140, 248, 0.28));
+  color: #7dd3fc;
+  border: 1px solid rgba(125, 211, 252, 0.4);
+}
+.profile-badge-chip.badge-tree {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.25), rgba(245, 158, 11, 0.25));
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+.profile-badge-chip.badge-sparkle {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.24), rgba(244, 114, 182, 0.26));
+  color: #fde047;
+  border: 1px solid rgba(253, 224, 71, 0.42);
+}
+
+/* Новые узоры и градиентные обои ленты чата */
+html[data-backdrop="snowflakes"] .messages-scroll {
+  background-color: transparent;
+  background-image:
+    radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.09) 0%, transparent 45%),
+    radial-gradient(circle at 82% 24%, rgba(168, 85, 247, 0.09) 0%, transparent 48%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg stroke='rgba(186,230,253,0.11)' stroke-width='1.1' stroke-linecap='round' fill='none'%3E%3Cpath d='M24 14v20M15.3 19l17.4 10M32.7 19L15.3 29'/%3E%3Cpath d='M72 60v16M65 64l14 8M79 64l-14 8'/%3E%3Ccircle cx='68' cy='22' r='1.3' fill='rgba(255,255,255,0.12)' stroke='none'/%3E%3Ccircle cx='28' cy='72' r='1.5' fill='rgba(125,211,252,0.14)' stroke='none'/%3E%3C/g%3E%3C/svg%3E");
+}
+html[data-backdrop="aurora_mesh"] .messages-scroll {
+  background-image:
+    radial-gradient(ellipse at 20% 10%, rgba(16, 185, 129, 0.16) 0%, transparent 52%),
+    radial-gradient(ellipse at 80% 18%, rgba(99, 102, 241, 0.18) 0%, transparent 52%),
+    radial-gradient(ellipse at 50% 88%, rgba(236, 72, 153, 0.11) 0%, transparent 56%);
+}
+html[data-backdrop="frost_prism"] .messages-scroll {
+  background-image:
+    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.14) 0%, transparent 55%),
+    linear-gradient(135deg, rgba(186, 230, 253, 0.04) 25%, transparent 25%),
+    linear-gradient(225deg, rgba(186, 230, 253, 0.04) 25%, transparent 25%);
+  background-size: 100% 100%, 36px 36px, 36px 36px;
+}
+html[data-backdrop="festive_gold"] .messages-scroll {
+  background-image:
+    radial-gradient(circle at 20% 15%, rgba(245, 158, 11, 0.13) 0%, transparent 48%),
+    radial-gradient(circle at 82% 22%, rgba(16, 185, 129, 0.12) 0%, transparent 48%),
+    radial-gradient(rgba(253, 224, 71, 0.16) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 34px 34px;
+}
+
+@media (max-width: 560px) {
+  .mood-packs-grid { grid-template-columns: 1fr; }
+}
+
 
 
