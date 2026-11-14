@@ -14,12 +14,14 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ContentResolver;
+import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.media.AudioManager;
 import android.net.Uri;
@@ -31,6 +33,7 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.util.Base64;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -45,17 +48,23 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 1001;
     private static final int REQ_RECORD_AUDIO = 1002;
     public static final int REQ_INSTALL_UNKNOWN_APPS = 1003;
     private static final int REQ_POST_NOTIFICATIONS = 1004;
+    private static final int REQ_PICK_ZERO_COPY = 1005;
+    private static final int REQ_CAMERA_VIDEO = 1006;
+    private static final int REQ_MEDIA_GALLERY = 1007;
 
     private static final String LEGACY_PACKAGE = "org.meshchat.app";
     private static final String META_PREFS = "meshchat_meta";
@@ -336,12 +345,32 @@ public final class MainActivity extends Activity {
                 try {
                     Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("*/*");
+
+                    boolean wantsImage = false;
+                    boolean wantsVideo = false;
+                    if (fileChooserParams != null && fileChooserParams.getAcceptTypes() != null) {
+                        for (String acc : fileChooserParams.getAcceptTypes()) {
+                            if (acc == null) continue;
+                            if (acc.contains("image/")) wantsImage = true;
+                            if (acc.contains("video/")) wantsVideo = true;
+                        }
+                    }
+                    if (wantsImage && wantsVideo) {
+                        intent.setType("*/*");
+                        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+                    } else if (wantsImage) {
+                        intent.setType("image/*");
+                    } else if (wantsVideo) {
+                        intent.setType("video/*");
+                    } else {
+                        intent.setType("*/*");
+                    }
+
                     if (fileChooserParams != null
                             && fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE) {
                         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
                     }
-                    startActivityForResult(Intent.createChooser(intent, "Выберите файл"), REQ_FILE_CHOOSER);
+                    startActivityForResult(Intent.createChooser(intent, "Выберите вложение"), REQ_FILE_CHOOSER);
                     return true;
                 } catch (Exception e) {
                     fileUploadCallback = null;
@@ -352,21 +381,71 @@ public final class MainActivity extends Activity {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(() -> {
+                    boolean wantsAudio = false;
+                    boolean wantsVideo = false;
                     for (String res : request.getResources()) {
-                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res)) {
-                            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                            } else {
-                                pendingWebRtcPermission = request;
-                                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
-                            }
-                            return;
-                        }
+                        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res)) wantsAudio = true;
+                        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res)) wantsVideo = true;
                     }
-                    request.deny();
+                    if (!wantsAudio && !wantsVideo) {
+                        request.deny();
+                        return;
+                    }
+
+                    List<String> missingPerms = new ArrayList<>();
+                    if (wantsAudio && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        missingPerms.add(Manifest.permission.RECORD_AUDIO);
+                    }
+                    if (wantsVideo && checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                        missingPerms.add(Manifest.permission.CAMERA);
+                    }
+
+                    if (missingPerms.isEmpty()) {
+                        List<String> grants = new ArrayList<>();
+                        if (wantsAudio) grants.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
+                        if (wantsVideo) grants.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+                        request.grant(grants.toArray(new String[0]));
+                    } else {
+                        pendingWebRtcPermission = request;
+                        requestPermissions(
+                                missingPerms.toArray(new String[0]),
+                                wantsVideo ? REQ_CAMERA_VIDEO : REQ_RECORD_AUDIO
+                        );
+                    }
                 });
             }
         });
+    }
+
+    private JSONObject inspectContentUriMeta(Uri uri) {
+        JSONObject item = new JSONObject();
+        try {
+            ContentResolver cr = getContentResolver();
+            String mime = cr.getType(uri);
+            String displayName = "attachment";
+            long sizeBytes = 0;
+
+            try (Cursor c = cr.query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int nameIdx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    int sizeIdx = c.getColumnIndex(OpenableColumns.SIZE);
+                    if (nameIdx >= 0 && !c.isNull(nameIdx)) {
+                        displayName = c.getString(nameIdx);
+                    }
+                    if (sizeIdx >= 0 && !c.isNull(sizeIdx)) {
+                        sizeBytes = c.getLong(sizeIdx);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+
+            item.put("uri", uri.toString());
+            item.put("name", displayName != null ? displayName : "file");
+            item.put("mime", mime != null ? mime : "application/octet-stream");
+            item.put("size", Math.max(0L, sizeBytes));
+        } catch (Exception ignored) {
+        }
+        return item;
     }
 
     @Override
@@ -387,6 +466,41 @@ public final class MainActivity extends Activity {
             }
             fileUploadCallback.onReceiveValue(results);
             fileUploadCallback = null;
+        } else if (requestCode == REQ_PICK_ZERO_COPY) {
+            JSONArray picked = new JSONArray();
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                List<Uri> uris = new ArrayList<>();
+                ClipData clip = data.getClipData();
+                if (clip != null && clip.getItemCount() > 0) {
+                    for (int i = 0; i < clip.getItemCount(); i++) {
+                        Uri u = clip.getItemAt(i).getUri();
+                        if (u != null) uris.add(u);
+                    }
+                } else if (data.getData() != null) {
+                    uris.add(data.getData());
+                }
+
+                ContentResolver cr = getContentResolver();
+                for (Uri u : uris) {
+                    try {
+                        cr.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ignored) {
+                        // Не все провайдеры поддерживают постоянный флаг — сессионное чтение остаётся активным
+                    }
+                    JSONObject meta = inspectContentUriMeta(u);
+                    if (meta.has("uri")) picked.put(meta);
+                }
+            }
+            if (webView != null) {
+                final String payload = picked.toString();
+                runOnUiThread(() -> {
+                    if (webView == null) return;
+                    webView.evaluateJavascript(
+                            "window.dispatchEvent(new CustomEvent('meshchat:zero-copy-picked',{detail:" + payload + "}));",
+                            null
+                    );
+                });
+            }
         } else if (requestCode == REQ_INSTALL_UNKNOWN_APPS && updater != null) {
             updater.triggerPackageInstallerIfPermitted();
         }
@@ -395,11 +509,21 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_RECORD_AUDIO) {
-            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (requestCode == REQ_RECORD_AUDIO || requestCode == REQ_CAMERA_VIDEO) {
+            boolean audioOk = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+            boolean camOk = checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
             if (pendingWebRtcPermission != null) {
-                if (granted) {
-                    pendingWebRtcPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                List<String> grants = new ArrayList<>();
+                for (String res : pendingWebRtcPermission.getResources()) {
+                    if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(res) && audioOk) {
+                        grants.add(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
+                    }
+                    if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(res) && camOk) {
+                        grants.add(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+                    }
+                }
+                if (!grants.isEmpty()) {
+                    pendingWebRtcPermission.grant(grants.toArray(new String[0]));
                 } else {
                     pendingWebRtcPermission.deny();
                 }
@@ -407,7 +531,15 @@ public final class MainActivity extends Activity {
             }
             if (webView != null) {
                 webView.evaluateJavascript(
-                        "window.dispatchEvent(new CustomEvent('meshchat:audio-perm',{detail:{granted:" + granted + "}}));",
+                        "window.dispatchEvent(new CustomEvent('meshchat:audio-perm',{detail:{granted:" + audioOk + ",camera:" + camOk + "}}));",
+                        null
+                );
+            }
+        } else if (requestCode == REQ_MEDIA_GALLERY) {
+            boolean ok = hasMediaGalleryAccessInternal();
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('meshchat:gallery-perm',{detail:{granted:" + ok + "}}));",
                         null
                 );
             }
@@ -487,7 +619,15 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами, шторкой уведомлений, аудио звонков, файлами и AndroidKeyStore */
+    private boolean hasMediaGalleryAccessInternal() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            return checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED
+                    || checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED;
+        }
+        return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Нативный мост управления узлами, шторкой уведомлений, аудио звонков, галереей, Zero-Copy ссылками и AndroidKeyStore */
     public final class AndroidJsBridge {
         @JavascriptInterface
         public String getAppInfoJson() {
@@ -516,6 +656,159 @@ public final class MainActivity extends Activity {
             String cid = pendingOpenChatId;
             pendingOpenChatId = null;
             return cid != null ? cid : "";
+        }
+
+        @JavascriptInterface
+        public String getLocalRefBaseUrl() {
+            if (localNode == null) return "";
+            return "http://127.0.0.1:" + localNode.getBoundPort()
+                    + "/local-ref?tok=" + localNode.getLocalRefSecret();
+        }
+
+        @JavascriptInterface
+        public boolean hasCameraPermission() {
+            return checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void ensureCameraPermission() {
+            runOnUiThread(() -> {
+                List<String> req = new ArrayList<>();
+                if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    req.add(Manifest.permission.CAMERA);
+                }
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    req.add(Manifest.permission.RECORD_AUDIO);
+                }
+                if (!req.isEmpty()) {
+                    requestPermissions(req.toArray(new String[0]), REQ_CAMERA_VIDEO);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean hasMediaGalleryPermission() {
+            return hasMediaGalleryAccessInternal();
+        }
+
+        @JavascriptInterface
+        public void ensureMediaGalleryPermission() {
+            runOnUiThread(() -> {
+                if (hasMediaGalleryAccessInternal()) return;
+                if (Build.VERSION.SDK_INT >= 33) {
+                    requestPermissions(
+                            new String[]{Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO},
+                            REQ_MEDIA_GALLERY
+                    );
+                } else {
+                    requestPermissions(
+                            new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
+                            REQ_MEDIA_GALLERY
+                    );
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public String listRecentDeviceMediaJson(int limit) {
+            JSONArray out = new JSONArray();
+            if (!hasMediaGalleryAccessInternal()) return out.toString();
+            int safeLimit = Math.max(1, Math.min(limit, 48));
+            try {
+                Uri collection = MediaStore.Files.getContentUri("external");
+                String[] proj = new String[]{
+                        MediaStore.Files.FileColumns._ID,
+                        MediaStore.Files.FileColumns.MEDIA_TYPE,
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.MIME_TYPE,
+                        MediaStore.MediaColumns.SIZE,
+                        MediaStore.Video.VideoColumns.DURATION,
+                        MediaStore.MediaColumns.DATE_ADDED
+                };
+                String sel = MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+                        + " OR " + MediaStore.Files.FileColumns.MEDIA_TYPE + "=" + MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
+                String sort = MediaStore.MediaColumns.DATE_ADDED + " DESC";
+
+                try (Cursor c = getContentResolver().query(collection, proj, sel, null, sort)) {
+                    if (c != null) {
+                        int idCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID);
+                        int typeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE);
+                        int nameCol = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME);
+                        int mimeCol = c.getColumnIndex(MediaStore.MediaColumns.MIME_TYPE);
+                        int sizeCol = c.getColumnIndex(MediaStore.MediaColumns.SIZE);
+                        int durCol = c.getColumnIndex(MediaStore.Video.VideoColumns.DURATION);
+
+                        int count = 0;
+                        while (c.moveToNext() && count < safeLimit) {
+                            long id = c.getLong(idCol);
+                            int mediaType = c.getInt(typeCol);
+                            boolean isVideo = mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO;
+                            Uri baseUri = isVideo
+                                    ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                    : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                            Uri itemUri = ContentUris.withAppendedId(baseUri, id);
+
+                            JSONObject obj = new JSONObject();
+                            obj.put("uri", itemUri.toString());
+                            obj.put("name", (nameCol >= 0 && !c.isNull(nameCol)) ? c.getString(nameCol) : (isVideo ? "video.mp4" : "photo.jpg"));
+                            obj.put("mime", (mimeCol >= 0 && !c.isNull(mimeCol)) ? c.getString(mimeCol) : (isVideo ? "video/mp4" : "image/jpeg"));
+                            obj.put("size", (sizeCol >= 0 && !c.isNull(sizeCol)) ? c.getLong(sizeCol) : 0L);
+                            obj.put("durationMs", (isVideo && durCol >= 0 && !c.isNull(durCol)) ? c.getLong(durCol) : 0L);
+                            obj.put("isVideo", isVideo);
+                            out.put(obj);
+                            count++;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            return out.toString();
+        }
+
+        @JavascriptInterface
+        public void pickZeroCopyLocalFiles(String mode) {
+            runOnUiThread(() -> {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                    if ("media".equalsIgnoreCase(mode)) {
+                        intent.setType("*/*");
+                        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+                    } else if ("image".equalsIgnoreCase(mode)) {
+                        intent.setType("image/*");
+                    } else {
+                        intent.setType("*/*");
+                    }
+                    startActivityForResult(intent, REQ_PICK_ZERO_COPY);
+                } catch (Exception e) {
+                    if (webView != null) {
+                        webView.evaluateJavascript(
+                                "window.dispatchEvent(new CustomEvent('meshchat:zero-copy-picked',{detail:[]}));",
+                                null
+                        );
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean openLocalUriExternally(String uriStr, String mimeType) {
+            if (uriStr == null || !uriStr.startsWith("content://")) return false;
+            try {
+                Uri uri = Uri.parse(uriStr);
+                String safeMime = (mimeType != null && !mimeType.trim().isEmpty())
+                        ? mimeType
+                        : getContentResolver().getType(uri);
+                Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+                viewIntent.setDataAndType(uri, safeMime != null ? safeMime : "*/*");
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(Intent.createChooser(viewIntent, "Открыть файл"));
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
         }
 
         @JavascriptInterface

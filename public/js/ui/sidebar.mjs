@@ -9,6 +9,7 @@ import {
   syncNow,
   notifyStore,
   setNavTab,
+  openFavoritesChat,
   openSettingsSection,
   uiText,
   uninstallLegacyApk,
@@ -60,7 +61,7 @@ export function Sidebar() {
       if (activeCustomFolder) return (activeCustomFolder.chatIds || []).includes(c.id);
       if (ui.spaceFilter === 'unread') return (c.unread || 0) > 0;
       if (ui.spaceFilter === 'dm') return c.kind === 'dm';
-      if (ui.spaceFilter === 'verified') return Boolean(c.verified) || c.kind === 'echo';
+      if (ui.spaceFilter === 'verified') return Boolean(c.verified) || c.kind === 'echo' || c.kind === 'favorites';
       if (ui.spaceFilter === 'pinned') return Boolean(c.pinned);
       if (ui.spaceFilter === 'ask') return c.kind === 'ask';
       return true;
@@ -106,12 +107,27 @@ export function Sidebar() {
     const checkPrefix = last?.out
       ? (last.status === 'read' || last.status === 'delivered' ? '✓✓ ' : '✓ ')
       : '';
+    const lastSummary = last
+      ? (last.type === 'article' && last.article?.title
+        ? `Статья: ${last.article.title}`
+        : last.media
+          ? (last.media.zeroCopy
+            ? `[Без копии] ${last.media.name}`
+            : last.media.mime?.startsWith('audio/')
+              ? '[Голосовое E2EE]'
+              : last.media.mime?.startsWith('video/')
+                ? `[Видео] ${last.media.name}`
+                : last.media.mime?.startsWith('image/')
+                  ? `[Фото] ${last.media.name}`
+                  : `[Файл] ${last.media.name}`)
+          : last.text)
+      : '';
     const previewBody = isTyping
       ? 'печатает…'
       : savedDraft
         ? `Черновик: ${savedDraft}`
         : last
-          ? `${checkPrefix}${last.text || (last.media?.mime?.startsWith('audio/') ? '[Голосовое E2EE]' : '[Зашифрованный файл]')}`
+          ? `${checkPrefix}${lastSummary}`
           : (c.lastPreview || 'Зашифрованный канал Double Ratchet');
 
     return html`<div
@@ -172,6 +188,13 @@ export function Sidebar() {
       </div>
 
       <div class="chats-hero-actions">
+        <button
+          type="button"
+          class="square-action-btn"
+          title="Открыть локальное «Избранное» на телефоне"
+          onClick=${() => openFavoritesChat()}
+        ><${Icon} name="bookmark" size=${18} /></button>
+
         <button
           type="button"
           class="square-action-btn festive-trigger-btn"

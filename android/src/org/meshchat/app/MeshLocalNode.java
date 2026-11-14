@@ -10,10 +10,17 @@
 
 package org.meshchat.app;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageInfo;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
+import android.os.Build;
 import android.util.Base64;
+import android.util.Size;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -79,6 +86,7 @@ public final class MeshLocalNode {
     private final SecureRandom rng = new SecureRandom();
     private final byte[] powSecret = new byte[32];
     private final byte[] synthSecret = new byte[32];
+    private final String localRefSecret;
     private final ExecutorService pool = Executors.newCachedThreadPool();
 
     private ServerSocket loopbackServer;
@@ -133,7 +141,12 @@ public final class MeshLocalNode {
         this.blobsDir.mkdirs();
         rng.nextBytes(powSecret);
         rng.nextBytes(synthSecret);
+        this.localRefSecret = randB64Url(24);
         loadPersistedUsers();
+    }
+
+    public String getLocalRefSecret() {
+        return localRefSecret;
     }
 
     public synchronized void startLoopback() {
@@ -305,6 +318,17 @@ public final class MeshLocalNode {
                     proxyApiOverOrbot(method, reqLine[1], headers, reqBody, out);
                 } else {
                     handleLocalApi(method, path, headers, reqBody, out);
+                }
+                sock.close();
+                return;
+            }
+
+            // Локальный потоковый мост без создания копий файлов (строго только с 127.0.0.1 + секретный токен сессии)
+            if ("/local-ref".equals(path)) {
+                if (sock.getInetAddress() != null && sock.getInetAddress().isLoopbackAddress()) {
+                    serveLocalContentUri(method, uri.getRawQuery(), headers, out);
+                } else {
+                    sendRawResponse(out, 403, "text/plain; charset=utf-8", "Forbidden".getBytes(StandardCharsets.UTF_8), false);
                 }
                 sock.close();
                 return;
@@ -980,7 +1004,168 @@ public final class MeshLocalNode {
         return n;
     }
 
-    // ─────────────────────── Раздача статики и криптографические утилиты ───────────────────────
+    // ─────────────────────── Потоковое чтение локальных URI без копий и статика ───────────────────────
+
+    private void serveLocalContentUri(String method, String rawQuery, Map<String, String> headers, OutputStream out) throws IOException {
+        Map<String, String> q = new HashMap<>();
+        if (rawQuery != null && !rawQuery.isEmpty()) {
+            for (String pair : rawQuery.split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq > 0) {
+                    q.put(
+                            java.net.URLDecoder.decode(pair.substring(0, eq), "UTF-8"),
+                            java.net.URLDecoder.decode(pair.substring(eq + 1), "UTF-8")
+                    );
+                }
+            }
+        }
+
+        String tok = q.get("tok");
+        String uriB64 = q.get("uri");
+        if (tok == null || uriB64 == null || !MessageDigest.isEqual(
+                tok.getBytes(StandardCharsets.UTF_8),
+                localRefSecret.getBytes(StandardCharsets.UTF_8)
+        )) {
+            sendRawResponse(out, 403, "text/plain; charset=utf-8", "Forbidden".getBytes(StandardCharsets.UTF_8), false);
+            return;
+        }
+
+        String rawUri;
+        try {
+            byte[] decoded = Base64.decode(uriB64, Base64.URL_SAFE | Base64.NO_PADDING | Base64.NO_WRAP);
+            rawUri = new String(decoded, StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            sendRawResponse(out, 400, "text/plain; charset=utf-8", "Bad URI".getBytes(StandardCharsets.UTF_8), false);
+            return;
+        }
+
+        if (!rawUri.startsWith("content://")) {
+            sendRawResponse(out, 400, "text/plain; charset=utf-8", "Only content:// allowed".getBytes(StandardCharsets.UTF_8), false);
+            return;
+        }
+
+        Uri contentUri = Uri.parse(rawUri);
+        ContentResolver resolver = appContext.getContentResolver();
+
+        // Быстрая миниатюра для встроенной галереи скрепки и превью без копирования исходника
+        if ("1".equals(q.get("thumb"))) {
+            try {
+                Bitmap bmp = null;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    bmp = resolver.loadThumbnail(contentUri, new Size(260, 260), null);
+                } else {
+                    try (InputStream is = resolver.openInputStream(contentUri)) {
+                        if (is != null) {
+                            BitmapFactory.Options opts = new BitmapFactory.Options();
+                            opts.inSampleSize = 4;
+                            bmp = BitmapFactory.decodeStream(is, null, opts);
+                        }
+                    }
+                }
+                if (bmp != null) {
+                    ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 76, bos);
+                    bmp.recycle();
+                    byte[] jpg = bos.toByteArray();
+                    sendRawResponse(out, 200, "image/jpeg", "HEAD".equals(method) ? new byte[0] : jpg, false);
+                    return;
+                }
+            } catch (Exception ignored) {
+                // Если миниатюра недоступна — отдаём поток ниже или 404
+            }
+        }
+
+        String mime = resolver.getType(contentUri);
+        if (mime == null || mime.trim().isEmpty()) {
+            mime = q.getOrDefault("mime", "application/octet-stream");
+        }
+
+        try (AssetFileDescriptor afd = resolver.openAssetFileDescriptor(contentUri, "r")) {
+            if (afd == null) {
+                sendRawResponse(out, 404, "text/plain; charset=utf-8", "Source file missing".getBytes(StandardCharsets.UTF_8), false);
+                return;
+            }
+            long totalLen = afd.getLength();
+            String rangeHdr = headers.get("range");
+
+            if (totalLen > 0 && rangeHdr != null && rangeHdr.startsWith("bytes=")) {
+                String spec = rangeHdr.substring(6).trim();
+                int dash = spec.indexOf('-');
+                long start = 0;
+                long end = totalLen - 1;
+                if (dash >= 0) {
+                    String s1 = spec.substring(0, dash).trim();
+                    String s2 = spec.substring(dash + 1).trim();
+                    if (!s1.isEmpty()) start = Math.max(0, Long.parseLong(s1));
+                    if (!s2.isEmpty()) end = Math.min(totalLen - 1, Long.parseLong(s2));
+                }
+                if (start > end || start >= totalLen) {
+                    String hdr416 = "HTTP/1.1 416 Range Not Satisfiable\r\n"
+                            + "Content-Range: bytes */" + totalLen + "\r\n"
+                            + "Connection: close\r\n\r\n";
+                    out.write(hdr416.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    return;
+                }
+                long chunkLen = (end - start) + 1;
+                String hdr206 = "HTTP/1.1 206 Partial Content\r\n"
+                        + "Content-Type: " + mime + "\r\n"
+                        + "Accept-Ranges: bytes\r\n"
+                        + "Content-Range: bytes " + start + "-" + end + "/" + totalLen + "\r\n"
+                        + "Content-Length: " + chunkLen + "\r\n"
+                        + "Cache-Control: private, max-age=60\r\n"
+                        + "Connection: close\r\n\r\n";
+                out.write(hdr206.getBytes(StandardCharsets.UTF_8));
+                if (!"HEAD".equals(method)) {
+                    try (InputStream fis = afd.createInputStream()) {
+                        long skipped = 0;
+                        while (skipped < start) {
+                            long s = fis.skip(start - skipped);
+                            if (s <= 0) break;
+                            skipped += s;
+                        }
+                        byte[] buf = new byte[32768];
+                        long rem = chunkLen;
+                        while (rem > 0) {
+                            int r = fis.read(buf, 0, (int) Math.min(buf.length, rem));
+                            if (r < 0) break;
+                            out.write(buf, 0, r);
+                            rem -= r;
+                        }
+                    }
+                }
+                out.flush();
+                return;
+            }
+
+            try (InputStream fis = afd.createInputStream()) {
+                if (totalLen >= 0) {
+                    String hdr200 = "HTTP/1.1 200 OK\r\n"
+                            + "Content-Type: " + mime + "\r\n"
+                            + "Accept-Ranges: bytes\r\n"
+                            + "Content-Length: " + totalLen + "\r\n"
+                            + "Cache-Control: private, max-age=60\r\n"
+                            + "Connection: close\r\n\r\n";
+                    out.write(hdr200.getBytes(StandardCharsets.UTF_8));
+                    if (!"HEAD".equals(method)) {
+                        byte[] buf = new byte[32768];
+                        int r;
+                        while ((r = fis.read(buf)) >= 0) {
+                            out.write(buf, 0, r);
+                        }
+                    }
+                    out.flush();
+                } else {
+                    byte[] all = readAllBytes(fis);
+                    sendRawResponse(out, 200, mime, "HEAD".equals(method) ? new byte[0] : all, false);
+                }
+            }
+        } catch (SecurityException se) {
+            sendRawResponse(out, 403, "text/plain; charset=utf-8", "Permission revoked".getBytes(StandardCharsets.UTF_8), false);
+        } catch (Exception e) {
+            sendRawResponse(out, 404, "text/plain; charset=utf-8", "Not found".getBytes(StandardCharsets.UTF_8), false);
+        }
+    }
 
     private void serveStaticAsset(String method, String path, OutputStream out) throws IOException {
         if ("/sw.js".equals(path)) {

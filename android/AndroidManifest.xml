@@ -1,24 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.meshchat.app"
-    android:versionCode="11"
-    android:versionName="2.0.0">
+    android:versionCode="12"
+    android:versionName="2.1.0">
 
     <uses-sdk
         android:minSdkVersion="26"
         android:targetSdkVersion="33" />
+
+    <!-- Камера необязательна для установки пакета на устройства без модуля камеры -->
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.camera.autofocus"
+        android:required="false" />
 
     <!-- Позволяет определить наличие старой копии org.meshchat.app (v1.1/v1.2) и предложить удалить её в 1 клик -->
     <queries>
         <package android:name="org.meshchat.app" />
     </queries>
 
-    <!-- Разрешения для P2P Mesh, WSS, Orbot Tor, микрофона, шторки уведомлений и автообновления APK -->
+    <!-- Разрешения для P2P Mesh, WSS, Orbot Tor, микрофона, камеры, медиагалереи, шторки уведомлений и автообновления APK -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

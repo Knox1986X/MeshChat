@@ -199,9 +199,9 @@ test('E2eeCallManager проводит полный цикл зашифрова�
   }
 });
 
-test('Версия v2.0.0 (build 11), 11 разделов настроек, папки чатов, энергосбережение и действия чата', async () => {
-  assert.equal(storeMod.APP_VERSION, '2.0.0');
-  assert.equal(storeMod.APP_VERSION_CODE, 11);
+test('Версия v2.1.0 (build 12), 11 разделов настроек, папки чатов, энергосбережение и действия чата', async () => {
+  assert.equal(storeMod.APP_VERSION, '2.1.0');
+  assert.equal(storeMod.APP_VERSION_CODE, 12);
   assert.equal(Object.keys(storeMod.THEME_PRESETS).length, 18);
   assert.equal(storeMod.HOLIDAY_MOOD_PACKS.length, 6);
   assert.ok(Object.keys(storeMod.BUBBLE_GRADIENTS).length >= 8);
@@ -284,7 +284,8 @@ test('Версия v2.0.0 (build 11), 11 разделов настроек, па
 test('Service Worker, атмосферный слой и Android MainActivity содержат полную реализацию', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const sw = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8');
-  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v11'"));
+  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v12'"));
+  assert.ok(sw.includes("url.pathname === '/local-ref'"));
   assert.ok(sw.includes("url.pathname.startsWith('/api/')"));
 
   const atmo = fs.readFileSync(path.join(root, 'public/js/ui/atmosphere-layer.mjs'), 'utf8');
@@ -297,15 +298,26 @@ test('Service Worker, атмосферный слой и Android MainActivity с
   assert.ok(java.includes('cancelChatNotification'));
   assert.ok(java.includes('setCallAudioMode'));
   assert.ok(java.includes('requestNotificationPermission'));
+  assert.ok(java.includes('pickZeroCopyLocalFiles'));
+  assert.ok(java.includes('takePersistableUriPermission'));
+  assert.ok(java.includes('listRecentDeviceMediaJson'));
+  assert.ok(java.includes('RESOURCE_VIDEO_CAPTURE'));
   assert.ok(java.includes('getClipData'));
+
+  const localNodeJava = fs.readFileSync(path.join(root, 'android/src/org/meshchat/app/MeshLocalNode.java'), 'utf8');
+  assert.ok(localNodeJava.includes('serveLocalContentUri'));
+  assert.ok(localNodeJava.includes('206 Partial Content'));
 
   const chatViewSrc = fs.readFileSync(path.join(root, 'public/js/ui/chat-view.mjs'), 'utf8');
   assert.ok(!chatViewSrc.includes('onceToggle'), 'Жёлтая кнопка [1] удалена из панели ввода чата');
 
   const manifest = fs.readFileSync(path.join(root, 'android/AndroidManifest.xml'), 'utf8');
   assert.ok(manifest.includes('package="io.meshchat.app"'));
-  assert.ok(manifest.includes('android:versionCode="11"'));
-  assert.ok(manifest.includes('android:versionName="2.0.0"'));
+  assert.ok(manifest.includes('android:versionCode="12"'));
+  assert.ok(manifest.includes('android:versionName="2.1.0"'));
+  assert.ok(manifest.includes('android.permission.CAMERA'));
+  assert.ok(manifest.includes('android.permission.READ_MEDIA_IMAGES'));
+  assert.ok(manifest.includes('android.permission.READ_MEDIA_VIDEO'));
 });
 
 test('v2.0: Кодек G.711 μ-law + AES-256-GCM аудиоретранслятор 4G CGNAT и шторка уведомлений Android', async () => {
@@ -415,3 +427,100 @@ test('v2.0: Кодек G.711 μ-law + AES-256-GCM аудиоретранслят
     globalThis.MeshChatAndroid = origBridge;
   }
 });
+
+test('v2.1: Локальное «Избранное» без копий файлов (Zero-Copy URI), публикация статей и сохранение из чатов', async () => {
+  const localRefMod = await import('../public/js/store/local-ref-store.mjs');
+
+  // 1. Открытие локального «Избранного» создаёт защищённый системный канал на устройстве
+  storeMod.store.me = { userId: 'u_fav', username: 'knox' };
+  storeMod.openFavoritesChat();
+  const favChat = storeMod.store.chats[storeMod.FAVORITES_CHAT_ID];
+  assert.ok(favChat, 'Канал favorites:local создан');
+  assert.equal(favChat.kind, 'favorites');
+  assert.equal(favChat.title, 'Избранное');
+  assert.equal(storeMod.store.ui.activeChatId, 'favorites:local');
+
+  // Защита системного «Избранного» от случайного удаления
+  await storeMod.deleteChat('favorites:local');
+  assert.ok(storeMod.store.chats['favorites:local'], 'Системное Избранное нельзя удалить');
+
+  // 2. Добавление фото/видео/файла с телефона сохраняет ТОЛЬКО прямую ссылку (0 байт копирования!)
+  const origBridge = globalThis.MeshChatAndroid;
+  globalThis.MeshChatAndroid = {
+    getLocalRefBaseUrl: () => 'http://127.0.0.1:27701/local-ref?tok=secret_test_123',
+    listRecentDeviceMediaJson: () => JSON.stringify([
+      {
+        uri: 'content://media/external/images/media/4042',
+        name: 'IMG_20261114.jpg',
+        mime: 'image/jpeg',
+        size: 4821900,
+        durationMs: 0,
+        isVideo: false,
+      },
+      {
+        uri: 'content://media/external/video/media/9011',
+        name: 'VID_20261114.mp4',
+        mime: 'video/mp4',
+        size: 58200400,
+        durationMs: 14200,
+        isVideo: true,
+      },
+    ]),
+  };
+
+  try {
+    const recent = localRefMod.listRecentAndroidMedia(10);
+    assert.equal(recent.length, 2);
+    assert.ok(recent[0].thumbUrl.includes('thumb=1'));
+    assert.ok(recent[1].streamUrl.includes('http://127.0.0.1:27701/local-ref?tok=secret_test_123&uri='));
+
+    const added = await storeMod.addZeroCopyItemsToFavorites(recent, { caption: 'Съёмка с телефона без копий' });
+    assert.equal(added.length, 2);
+    assert.equal(added[0].media.zeroCopy, true);
+    assert.equal(added[0].media.refKind, 'android-uri');
+    assert.equal(added[0].media.localRefUri, 'content://media/external/images/media/4042');
+    assert.equal(added[0].localOnly, true);
+    assert.equal(added[0].text, 'Съёмка с телефона без копий');
+    // Убеждаемся, что сырые байты файла (58 МБ) не записаны в объект сообщения
+    assert.equal(added[1].media.bytes, undefined);
+    assert.equal(added[1].media.blobId, undefined);
+    assert.ok(localRefMod.getCachedZeroCopyUrl(added[1].media).startsWith('http://127.0.0.1:27701/local-ref'));
+
+    // 3. Публикация встроенной статьи (Telegraph-стиль) и сохранение сообщения из другого чата в Избранное
+    const artMsg = await storeMod.sendArticleMessage('favorites:local', {
+      title: 'Архитектура Zero-Copy в MeshChat',
+      subtitle: 'Как экономить гигабайты памяти на Android',
+      body: '## Прямой доступ\nMeshChat читает исходный `content://` поток через ContentResolver.\n\n- Без копирования\n- HTTP 206 Range для видео',
+    });
+    assert.equal(artMsg.type, 'article');
+    assert.equal(artMsg.article.title, 'Архитектура Zero-Copy в MeshChat');
+    assert.ok(artMsg.article.readingMinutes >= 1);
+
+    // Сохранение сообщения из другого чата в «Избранное»
+    storeMod.store.chats['dm:peer_art'] = {
+      id: 'dm:peer_art',
+      kind: 'dm',
+      peerId: 'peer_art',
+      title: '@alex',
+    };
+    storeMod.store.messages['dm:peer_art'] = [
+      {
+        id: 'm_src_1',
+        chatId: 'dm:peer_art',
+        out: false,
+        type: 'text',
+        text: 'Важные координаты встречи в 19:00',
+        ts: Date.now(),
+        reactions: {},
+      },
+    ];
+    const forwarded = await storeMod.saveMessageToFavorites('dm:peer_art', 'm_src_1');
+    assert.ok(forwarded);
+    assert.equal(forwarded.chatId, 'favorites:local');
+    assert.equal(forwarded.forwardedFrom, '@alex');
+    assert.equal(forwarded.text, 'Важные координаты встречи в 19:00');
+  } finally {
+    globalThis.MeshChatAndroid = origBridge;
+  }
+});
+

@@ -306,6 +306,12 @@ const ICON_PATHS = {
   battery: html`<rect x="2" y="7" width="16" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13" stroke-width="2.4"/><rect x="5" y="10" width="7" height="4" rx="0.8" fill="currentColor"/>`,
   moreVert: html`<circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/>`,
   chevronRight: html`<path d="m9 18 6-6-6-6"/>`,
+  bookmark: html`<path d="m19 21-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>`,
+  article: html`<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/>`,
+  fileDoc: html`<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>`,
+  image: html`<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>`,
+  video: html`<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>`,
+  link: html`<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`,
   mesh: html`<path d="M12 3 4 7v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10V7l-8-4Z"/><circle cx="12" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/><circle cx="9.6" cy="15.2" r="1.3" fill="currentColor"/><circle cx="14.4" cy="15.2" r="1.3" fill="currentColor"/><path d="M8.5 11 12 8.5 15.5 11 14.4 15.2H9.6L8.5 11Z" stroke-width="1.3"/>`,
 };
 
@@ -385,16 +391,24 @@ export function AvatarBox({
       ? (raw.split(/\s+/)[0][0] + raw.split(/\s+/)[1][0]).toUpperCase()
       : raw.slice(0, 2).toUpperCase();
 
+  const bgStyle = avatarDataUrl
+    ? '#0e111b'
+    : kind === 'favorites'
+      ? 'linear-gradient(135deg, #2563EB, #4F46E5)'
+      : color;
+
   return html`<div
     class=${`avatar-box ${className}`}
-    style=${`width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;background:${avatarDataUrl ? '#0e111b' : color}`}
+    style=${`width:${size}px;height:${size}px;min-width:${size}px;min-height:${size}px;background:${bgStyle}`}
     onClick=${onClick}
   >
     ${avatarDataUrl
       ? html`<img src=${avatarDataUrl} alt="" class="avatar-img" loading="lazy" />`
-      : kind === 'ask'
-        ? html`<${Icon} name="inbox" size=${Math.round(size * 0.44)} />`
-        : html`<span class="avatar-initials" style=${`font-size:${Math.max(11, Math.round(size * 0.34))}px`}>${initials}</span>`}
+      : kind === 'favorites'
+        ? html`<${Icon} name="bookmark" size=${Math.round(size * 0.46)} />`
+        : kind === 'ask'
+          ? html`<${Icon} name="inbox" size=${Math.round(size * 0.44)} />`
+          : html`<span class="avatar-initials" style=${`font-size:${Math.max(11, Math.round(size * 0.34))}px`}>${initials}</span>`}
     ${online && html`<span class="avatar-online-dot"></span>`}
   </div>`;
 }

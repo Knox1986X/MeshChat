@@ -153,7 +153,9 @@ export function ModalLayer() {
         <div class="once-preview-box">
           ${d.mime?.startsWith('image/')
             ? html`<img src=${d.url} alt="Зашифрованное вложение" />`
-            : html`<a class="btn-primary" href=${d.url} download=${d.name || 'once.bin'}>Сохранить расшифрованный файл</a>`}
+            : d.mime?.startsWith('video/')
+              ? html`<video src=${d.url} controls autoplay playsInline style="max-width:100%;max-height:70vh;border-radius:12px"></video>`
+              : html`<a class="btn-primary" href=${d.url} download=${d.name || 'once.bin'}>Сохранить расшифрованный файл</a>`}
         </div>
       </div>
     </div>`;

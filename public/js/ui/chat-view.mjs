@@ -7,6 +7,7 @@ import { html, useState, useRef, useEffect } from '../../vendor/preact.mjs';
 import {
   store,
   notifyStore,
+  FAVORITES_CHAT_ID,
   REACTION_PACKS,
   COMPOSER_QUICK_EMOJIS,
   updateClientSettings,
@@ -19,6 +20,8 @@ import {
   openEncryptedMedia,
   saveDecryptedMediaToDevice,
   openPeerProfileModal,
+  openFavoritesChat,
+  saveMessageToFavorites,
   togglePinChat,
   toggleMessageReaction,
   blockAnonQuestionAuthor,
@@ -27,6 +30,16 @@ import {
   copyWithPrivacy,
   showToast,
 } from '../store/app-store.mjs';
+import {
+  getCachedZeroCopyUrl,
+  resolveZeroCopyUrl,
+  openZeroCopyFile,
+} from '../store/local-ref-store.mjs';
+import {
+  AttachmentSheetModal,
+  ArticleMessageCard,
+  ArticleReaderModal,
+} from './attachment-sheet.mjs';
 import {
   Icon,
   AvatarBox,
@@ -143,6 +156,103 @@ function EncryptedAudioPlayer({ msg, previewUrl }) {
   </div>`;
 }
 
+/** Прямой просмотр Zero-Copy файлов/фото/видео с телефона без создания копии в памяти приложения */
+function ZeroCopyOrLocalMedia({ msg, settings, unblurredMap, setUnblurredMap }) {
+  const mediaObj = msg.media;
+  const [streamUrl, setStreamUrl] = useState(() => getCachedZeroCopyUrl(mediaObj));
+  const [sourceMissing, setSourceMissing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSourceMissing(false);
+    const sync = getCachedZeroCopyUrl(mediaObj);
+    if (sync) {
+      setStreamUrl(sync);
+    } else {
+      resolveZeroCopyUrl(mediaObj).then((u) => {
+        if (!cancelled) {
+          if (u) setStreamUrl(u);
+          else setSourceMissing(true);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaObj?.localRefUri, mediaObj?.fsHandleId]);
+
+  if (!mediaObj) return null;
+  const mime = String(mediaObj.mime || '');
+  const isBlurred = Boolean(settings.blurMediaInChat && !unblurredMap[msg.id]);
+
+  if (sourceMissing) {
+    return html`<div class="zero-copy-missing">
+      <${Icon} name="link" size=${16} />
+      <div>
+        <b>${mediaObj.name || 'Файл на устройстве'}</b>
+        <span>Исходный файл перемещён или удалён из памяти телефона</span>
+      </div>
+    </div>`;
+  }
+
+  return html`<div class="zero-copy-media-wrap">
+    ${mime.startsWith('image/') && streamUrl
+      ? html`<img
+          class=${`decrypted-img ${isBlurred ? 'privacy-blurred' : ''}`}
+          src=${streamUrl}
+          alt=${mediaObj.name}
+          onError=${() => setSourceMissing(true)}
+          onClick=${(e) => {
+            if (isBlurred) {
+              e.stopPropagation();
+              setUnblurredMap((prev) => ({ ...prev, [msg.id]: true }));
+            }
+          }}
+        />`
+      : mime.startsWith('video/') && streamUrl
+        ? html`<video
+            class=${`decrypted-video ${isBlurred ? 'privacy-blurred' : ''}`}
+            src=${streamUrl}
+            controls
+            playsInline
+            preload="metadata"
+            onError=${() => setSourceMissing(true)}
+            onClick=${(e) => {
+              e.stopPropagation();
+              if (isBlurred) setUnblurredMap((prev) => ({ ...prev, [msg.id]: true }));
+            }}
+          ></video>`
+        : mime.startsWith('audio/') && streamUrl
+          ? html`<${EncryptedAudioPlayer} msg=${msg} previewUrl=${streamUrl} />`
+          : html`<button
+              type="button"
+              class="file-dl-btn zero-copy-doc-btn"
+              onClick=${(e) => {
+                e.stopPropagation();
+                openZeroCopyFile(mediaObj);
+              }}
+            >
+              <${Icon} name=${mediaObj.zeroCopy ? 'link' : 'fileDoc'} size=${17} />
+              <div>
+                <b>${mediaObj.name}</b>
+                <span>
+                  ${formatBytes(mediaObj.size, settings.byteUnits)}
+                  ${mediaObj.zeroCopy ? ' · Прямая ссылка с телефона (без копии)' : ' · Локально на устройстве'}
+                </span>
+              </div>
+            </button>`}
+
+    <div class="zero-copy-tag-row">
+      <${Icon} name=${mediaObj.zeroCopy ? 'link' : 'bookmark'} size=${11} />
+      <span>
+        ${mediaObj.zeroCopy
+          ? `Без копии · открыто из исходной папки (${formatBytes(mediaObj.size, settings.byteUnits)})`
+          : `Локально на телефоне · ${formatBytes(mediaObj.size, settings.byteUnits)}`}
+      </span>
+    </div>
+  </div>`;
+}
+
 export function ChatView() {
   const { chats, messages, decryptedMediaUrls, typingByChat, ui, me, settings } = store;
   const chat = ui.activeChatId ? chats[ui.activeChatId] : null;
@@ -162,6 +272,12 @@ export function ChatView() {
 
   const scrollRef = useRef(null);
   const fileInputRef = useRef(null);
+  const [attachSheetOpen, setAttachSheetOpen] = useState(false);
+  const [readingArticleMsg, setReadingArticleMsg] = useState(null);
+
+  useEffect(() => {
+    setAttachSheetOpen(false);
+  }, [chat?.id]);
 
   useEffect(() => {
     if (ui.editingMsg && ui.editingMsg.chatId === chat?.id) {
@@ -198,11 +314,11 @@ export function ChatView() {
           <button type="button" class="btn-primary" onClick=${() => { store.ui.modal = 'new-chat'; notifyStore(); }}>
             <${Icon} name="plus" size=${15} /> Новый диалог
           </button>
+          <button type="button" class="btn-ghost" onClick=${() => openFavoritesChat()}>
+            <${Icon} name="bookmark" size=${15} /> Избранное
+          </button>
           <button type="button" class="btn-ghost" onClick=${() => { store.ui.modal = 'qr'; notifyStore(); }}>
             <${Icon} name="qr" size=${15} /> Мой QR-код
-          </button>
-          <button type="button" class="btn-ghost" onClick=${() => toggleBossMode(true)}>
-            <${Icon} name="eyeOff" size=${15} /> Блокировка (Esc×2)
           </button>
         </div>
       </div>
@@ -217,7 +333,9 @@ export function ChatView() {
   const list = searchQ
     ? rawList.filter((m) =>
         (m.text || '').toLowerCase().includes(searchQ) ||
-        (m.media?.name || '').toLowerCase().includes(searchQ)
+        (m.media?.name || '').toLowerCase().includes(searchQ) ||
+        (m.article?.title || '').toLowerCase().includes(searchQ) ||
+        (m.article?.body || '').toLowerCase().includes(searchQ)
       )
     : rawList;
 
@@ -388,15 +506,17 @@ export function ChatView() {
             <${ProfileBadgeIcon} badge=${peerBadge} size=${13} />
           </div>
           <div class="peer-sub">
-            <${Icon} name=${chat.verified || chat.kind !== 'dm' ? 'shield' : 'lock'} size=${12} />
+            <${Icon} name=${chat.kind === 'favorites' ? 'bookmark' : (chat.verified || chat.kind !== 'dm' ? 'shield' : 'lock')} size=${12} />
             ${isPeerTyping
               ? html`<span class="typing-live-pill">печатает… (E2EE)</span>`
               : html`<span>
-                  ${chat.kind === 'echo'
-                    ? 'Локальный сейф и самопроверка AES-256-GCM'
-                    : chat.kind === 'ask'
-                      ? 'Внешний E2E-шлюз приёма обращений'
-                      : chat.peerProfile?.statusText || (chat.verified ? 'Ключ подтверждён · Double Ratchet' : `@${chat.username} · нажмите для профиля`)}
+                  ${chat.kind === 'favorites'
+                    ? 'На телефоне · файлы по прямой ссылке без копий'
+                    : chat.kind === 'echo'
+                      ? 'Локальный сейф и самопроверка AES-256-GCM'
+                      : chat.kind === 'ask'
+                        ? 'Внешний E2E-шлюз приёма обращений'
+                        : chat.peerProfile?.statusText || (chat.verified ? 'Ключ подтверждён · Double Ratchet' : `@${chat.username} · нажмите для профиля`)}
                 </span>`}
             ${chat.ttlSec > 0 && html`<span class="ttl-pill">TTL ${ttlText(chat.ttlSec)}</span>`}
           </div>
@@ -507,54 +627,85 @@ export function ChatView() {
                 </span>
               </div>
 
+              ${m.forwardedFrom && html`<div class="msg-forward-tag">
+                <${Icon} name="bookmark" size=${11} />
+                <span>Сохранено из: ${m.forwardedFrom}</span>
+              </div>`}
+
               ${m.replyTo && html`<div class="msg-reply-quote">
                 <span>${m.replyTo.text}</span>
               </div>`}
 
+              ${m.type === 'article' && m.article && html`<${ArticleMessageCard}
+                msg=${m}
+                onOpenArticle=${(artMsg) => setReadingArticleMsg(artMsg)}
+              />`}
+
               ${mediaObj && html`<div class="media-card">
-                ${mediaObj.once
-                  ? html`<button
-                      type="button"
-                      class=${`once-media-btn ${mediaObj.burned ? 'burned' : ''}`}
-                      disabled=${Boolean(mediaObj.burned)}
-                      onClick=${() => openEncryptedMedia(m)}
-                    >
-                      <${Icon} name="once" size=${18} />
-                      <div>
-                        <b>${mediaObj.burned ? 'Вложение [1×] уничтожено' : 'Зашифрованное вложение [1×]'}</b>
-                        <span>${mediaObj.burned ? 'Стерто с узла после однократного чтения' : `${formatBytes(mediaObj.size)} · Доступно 1 открытие`}</span>
-                      </div>
-                    </button>`
-                  : isAudio
-                    ? html`<${EncryptedAudioPlayer} msg=${m} previewUrl=${previewUrl} />`
-                    : previewUrl && mediaObj.mime?.startsWith('image/')
-                      ? html`<img
-                          class=${`decrypted-img ${settings.blurMediaInChat && !unblurredMap[m.id] ? 'privacy-blurred' : ''}`}
-                          src=${previewUrl}
-                          alt=${mediaObj.name}
-                          onClick=${(e) => {
-                            if (settings.blurMediaInChat && !unblurredMap[m.id]) {
-                              e.stopPropagation();
-                              setUnblurredMap((prev) => ({ ...prev, [m.id]: true }));
-                            }
-                          }}
-                        />`
-                      : html`<button type="button" class="file-dl-btn" onClick=${async () => {
-                          if (mediaObj.mime?.startsWith('image/')) {
-                            await openEncryptedMedia(m);
-                          } else {
-                            await saveDecryptedMediaToDevice(m);
-                          }
-                        }}>
-                          <${Icon} name="lock" size=${16} />
-                          <div>
-                            <b>${mediaObj.name}</b>
-                            <span>${formatBytes(mediaObj.size, settings.byteUnits)} · AES-256-GCM · нажмите для расшифровки</span>
-                          </div>
-                        </button>`}
+                ${(mediaObj.zeroCopy || mediaObj.localOnly)
+                  ? html`<${ZeroCopyOrLocalMedia}
+                      msg=${m}
+                      settings=${settings}
+                      unblurredMap=${unblurredMap}
+                      setUnblurredMap=${setUnblurredMap}
+                    />`
+                  : mediaObj.once
+                    ? html`<button
+                        type="button"
+                        class=${`once-media-btn ${mediaObj.burned ? 'burned' : ''}`}
+                        disabled=${Boolean(mediaObj.burned)}
+                        onClick=${() => openEncryptedMedia(m)}
+                      >
+                        <${Icon} name="once" size=${18} />
+                        <div>
+                          <b>${mediaObj.burned ? 'Вложение [1×] уничтожено' : 'Зашифрованное вложение [1×]'}</b>
+                          <span>${mediaObj.burned ? 'Стерто с узла после однократного чтения' : `${formatBytes(mediaObj.size)} · Доступно 1 открытие`}</span>
+                        </div>
+                      </button>`
+                    : isAudio
+                      ? html`<${EncryptedAudioPlayer} msg=${m} previewUrl=${previewUrl} />`
+                      : previewUrl && mediaObj.mime?.startsWith('image/')
+                        ? html`<img
+                            class=${`decrypted-img ${settings.blurMediaInChat && !unblurredMap[m.id] ? 'privacy-blurred' : ''}`}
+                            src=${previewUrl}
+                            alt=${mediaObj.name}
+                            onClick=${(e) => {
+                              if (settings.blurMediaInChat && !unblurredMap[m.id]) {
+                                e.stopPropagation();
+                                setUnblurredMap((prev) => ({ ...prev, [m.id]: true }));
+                              }
+                            }}
+                          />`
+                        : previewUrl && mediaObj.mime?.startsWith('video/')
+                          ? html`<video
+                              class=${`decrypted-video ${settings.blurMediaInChat && !unblurredMap[m.id] ? 'privacy-blurred' : ''}`}
+                              src=${previewUrl}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              onClick=${(e) => {
+                                e.stopPropagation();
+                                if (settings.blurMediaInChat && !unblurredMap[m.id]) {
+                                  setUnblurredMap((prev) => ({ ...prev, [m.id]: true }));
+                                }
+                              }}
+                            ></video>`
+                          : html`<button type="button" class="file-dl-btn" onClick=${async () => {
+                              if (mediaObj.mime?.startsWith('image/') || mediaObj.mime?.startsWith('video/')) {
+                                await openEncryptedMedia(m);
+                              } else {
+                                await saveDecryptedMediaToDevice(m);
+                              }
+                            }}>
+                              <${Icon} name=${mediaObj.mime?.startsWith('video/') ? 'video' : 'lock'} size=${16} />
+                              <div>
+                                <b>${mediaObj.name}</b>
+                                <span>${formatBytes(mediaObj.size, settings.byteUnits)} · AES-256-GCM · нажмите для расшифровки</span>
+                              </div>
+                            </button>`}
               </div>`}
 
-              ${m.text && html`<div class=${`msg-text ${settings.largeSingleEmoji !== false && !mediaObj && isStandaloneEmoji(m.text) ? 'msg-jumbo-emoji' : ''}`}>
+              ${m.text && m.type !== 'article' && html`<div class=${`msg-text ${settings.largeSingleEmoji !== false && !mediaObj && isStandaloneEmoji(m.text) ? 'msg-jumbo-emoji' : ''}`}>
                 <${RichMessageText} text=${m.text} />
               </div>`}
 
@@ -598,6 +749,14 @@ export function ChatView() {
                     notifyStore();
                   }}
                 ><${Icon} name="reply" size=${13} /></button>
+                ${chat.id !== FAVORITES_CHAT_ID && html`<button
+                  type="button"
+                  title="Сохранить в локальное «Избранное»"
+                  onClick=${() => {
+                    saveMessageToFavorites(chat.id, m.id);
+                    setActiveMsgActionsId(null);
+                  }}
+                ><${Icon} name="bookmark" size=${13} /></button>`}
                 ${m.text && html`<button
                   type="button"
                   title="Копировать текст"
@@ -694,8 +853,8 @@ export function ChatView() {
               <button
                 type="button"
                 class="composer-icon"
-                title="Прикрепить зашифрованный файл (AES-256-GCM)"
-                onClick=${() => fileInputRef.current?.click()}
+                title="Вложения: фото/видео из приложения, файл или статья"
+                onClick=${() => setAttachSheetOpen(true)}
               ><${Icon} name="clip" size=${17} /></button>
 
               <textarea
@@ -704,11 +863,13 @@ export function ChatView() {
                 spellcheck=${settings.spellcheck !== false}
                 autoComplete=${settings.incognitoKeyboard ? 'off' : 'on'}
                 autoCorrect=${settings.incognitoKeyboard ? 'off' : 'on'}
-                placeholder=${chat.kind === 'echo'
-                  ? 'Текст для эхо-проверки E2EE…'
-                  : settings.enterToSend === false
-                    ? 'Сообщение (Ctrl+Enter — отправить)…'
-                    : 'Сообщение (E2EE)…'}
+                placeholder=${chat.kind === 'favorites'
+                  ? 'Заметка в Избранное (на телефоне)…'
+                  : chat.kind === 'echo'
+                    ? 'Текст для эхо-проверки E2EE…'
+                    : settings.enterToSend === false
+                      ? 'Сообщение (Ctrl+Enter — отправить)…'
+                      : 'Сообщение (E2EE)…'}
                 value=${draft}
                 onInput=${(e) => {
                   const v = e.target.value;
@@ -738,5 +899,15 @@ export function ChatView() {
                   </button>`}
             </div>
           </form>`}
+
+    ${attachSheetOpen && html`<${AttachmentSheetModal}
+      chat=${chat}
+      onClose=${() => setAttachSheetOpen(false)}
+    />`}
+
+    ${readingArticleMsg && html`<${ArticleReaderModal}
+      msg=${readingArticleMsg}
+      onClose=${() => setReadingArticleMsg(null)}
+    />`}
   </main>`;
 }

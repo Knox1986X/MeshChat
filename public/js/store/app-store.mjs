@@ -29,6 +29,10 @@ import { FallbackTransport } from '../transport/fallback-transport.mjs';
 import { E2eeCallManager } from '../transport/call-manager.mjs';
 import { EncryptedClientDb } from './idb-messages.mjs';
 import { playSfx } from '../ui/boss-screen.mjs';
+import {
+  saveLocalCapturedBlob,
+  readAndroidUriAsFile,
+} from './local-ref-store.mjs';
 
 // Палитра аватаров контактов (глубокие благородные оттенки)
 const AVATAR_PALETTE = [
@@ -42,8 +46,9 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '2.0.0';
-export const APP_VERSION_CODE = 11;
+export const APP_VERSION = '2.1.0';
+export const APP_VERSION_CODE = 12;
+export const FAVORITES_CHAT_ID = 'favorites:local';
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -1264,9 +1269,31 @@ export function toggleAndroidLanMesh() {
   }
 }
 
-/** Создаёт системные чаты (Эхо-проверка E2EE + Входящий шлюз) и нормализует сохранённые */
+/** Создаёт системные чаты (Локальное Избранное, Эхо-проверка E2EE + Входящий шлюз) и нормализует сохранённые */
 function ensureSystemChats(chatsObj, username = '') {
   const next = chatsObj && typeof chatsObj === 'object' ? { ...chatsObj } : {};
+
+  if (!next[FAVORITES_CHAT_ID]) {
+    next[FAVORITES_CHAT_ID] = {
+      id: FAVORITES_CHAT_ID,
+      kind: 'favorites',
+      peerId: 'self-local',
+      username: 'saved',
+      title: 'Избранное',
+      avatarColor: '#2563EB',
+      verified: true,
+      pinned: true,
+      muted: true,
+      ttlSec: 0,
+      unread: 0,
+      lastPreview: 'Заметки, статьи и прямые ссылки на файлы телефона без копий',
+      lastTs: Date.now() - 500,
+    };
+  } else {
+    next[FAVORITES_CHAT_ID].kind = 'favorites';
+    next[FAVORITES_CHAT_ID].title = 'Избранное';
+    if (next[FAVORITES_CHAT_ID].pinned === undefined) next[FAVORITES_CHAT_ID].pinned = true;
+  }
 
   if (!next['echo:loopback']) {
     next['echo:loopback'] = {
@@ -1323,6 +1350,21 @@ function ensureSystemChats(chatsObj, username = '') {
 
 function ensureSystemMessages(messagesObj, username = '') {
   const next = messagesObj && typeof messagesObj === 'object' ? { ...messagesObj } : {};
+  if (!next[FAVORITES_CHAT_ID]?.length) {
+    next[FAVORITES_CHAT_ID] = [
+      {
+        id: 'favorites_welcome',
+        chatId: FAVORITES_CHAT_ID,
+        out: false,
+        type: 'highlight',
+        text: 'Локальное хранилище «Избранное»: заметки, статьи и вложения сохраняются только на вашем телефоне без отправки на сервер. При добавлении фото, видео или файлов с устройства MeshChat не создаёт дублирующую копию, а использует прямую ссылку на исходный файл для экономии памяти.',
+        ts: Date.now() - 500,
+        ttlSec: 0,
+        expiresAt: 0,
+        reactions: {},
+      },
+    ];
+  }
   if (!next['echo:loopback']?.length) {
     next['echo:loopback'] = [
       {
@@ -2287,6 +2329,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     text: payload.text || '',
     replyTo: payload.replyTo || null,
     media: payload.media || null,
+    article: payload.article || null,
     reactions: {},
     ts: dec.sentAt || now,
     ttlSec,
@@ -2297,13 +2340,19 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   list.push(msg);
   const chat = store.chats[chatId];
   chat.lastTs = msg.ts;
-  chat.lastPreview = msg.media
-    ? (msg.media.once
-      ? '[1×] Вложение'
-      : msg.media.mime?.startsWith('audio/')
-        ? 'Голосовое сообщение (E2EE)'
-        : `[Файл] ${msg.media.name}`)
-    : msg.text.slice(0, 90);
+  chat.lastPreview = msg.type === 'article' && msg.article?.title
+    ? `Статья: ${msg.article.title.slice(0, 74)}`
+    : msg.media
+      ? (msg.media.once
+        ? '[1×] Вложение'
+        : msg.media.mime?.startsWith('audio/')
+          ? 'Голосовое сообщение (E2EE)'
+          : msg.media.mime?.startsWith('video/')
+            ? `Видео: ${msg.media.name || 'клип'}`
+            : msg.media.mime?.startsWith('image/')
+              ? `Фото: ${msg.media.name || 'снимок'}`
+              : `[Файл] ${msg.media.name}`)
+      : msg.text.slice(0, 90);
 
   const isAppForeground = !(typeof document !== 'undefined' && document.hidden);
   const isChatVisible =
@@ -2693,12 +2742,20 @@ export async function runMeshDiagnostics() {
 
 // ─────────────────────── Чаты, Гарантированная Доставка и Файлы E2E ───────────────────────
 
+export function openFavoritesChat() {
+  if (!store.chats[FAVORITES_CHAT_ID]) {
+    store.chats = ensureSystemChats(store.chats, store.me?.username || '');
+    store.messages = ensureSystemMessages(store.messages, store.me?.username || '');
+  }
+  selectChat(FAVORITES_CHAT_ID);
+}
+
 export async function startChatWithUsername(query) {
   const clean = String(query || '').trim().replace(/^@/, '').toLowerCase();
   if (!clean) return;
-  if (clean === store.me?.username) {
-    selectChat('echo:loopback');
-    showToast('Открыт ваш личный зашифрованный канал Эхо-проверки E2EE');
+  if (clean === store.me?.username || clean === 'избранное' || clean === 'saved') {
+    openFavoritesChat();
+    showToast('Открыто локальное «Избранное» на вашем устройстве');
     return;
   }
 
@@ -2869,7 +2926,7 @@ export async function clearSingleChatHistory(chatId) {
 
 export async function deleteChat(chatId) {
   const chat = store.chats[chatId];
-  if (!chat || chat.kind === 'echo' || chat.kind === 'ask') {
+  if (!chat || chat.kind === 'echo' || chat.kind === 'ask' || chat.kind === 'favorites') {
     showToast('Системные защищённые каналы можно очистить, но не удалить');
     return;
   }
@@ -2888,7 +2945,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
   const chat = store.chats[chatId];
   if (!chat || chat.kind === 'ask') return;
   const trimmed = String(text || '').trim();
-  if (!trimmed && !extra.media) return;
+  if (!trimmed && !extra.media && !extra.article) return;
 
   const msgId = `m_${toBase64Url(randomBytes(9))}`;
   const ttlSec = extra.ttlSec !== undefined ? extra.ttlSec : (chat.ttlSec || 0);
@@ -2901,33 +2958,58 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     id: msgId,
     chatId,
     out: true,
-    type: extra.type || (extra.media ? 'media' : 'text'),
+    type: extra.type || (extra.article ? 'article' : extra.media ? 'media' : 'text'),
     text: trimmed,
     replyTo: replyObj,
     media: extra.media || null,
+    article: extra.article || null,
+    forwardedFrom: extra.forwardedFrom || null,
+    localOnly: chat.kind === 'favorites',
     reactions: {},
     ts: now,
     ttlSec,
     expiresAt: ttlSec > 0 ? now + ttlSec * 1000 : 0,
-    status: chat.kind === 'echo' ? 'sent' : 'sending',
+    status: chat.kind === 'favorites' ? 'read' : chat.kind === 'echo' ? 'sent' : 'sending',
   };
 
   store.ui.replyTo = null;
   const list = store.messages[chatId] || (store.messages[chatId] = []);
   list.push(localMsg);
   chat.lastTs = now;
-  chat.lastPreview = localMsg.media
-    ? (localMsg.media.once
-      ? '[1×] Вложение'
-      : localMsg.media.mime?.startsWith('audio/')
-        ? 'Голосовое сообщение (E2EE)'
-        : `[Файл] ${localMsg.media.name}`)
-    : trimmed.slice(0, 90);
+  chat.lastPreview = localMsg.type === 'article' && localMsg.article?.title
+    ? `Статья: ${localMsg.article.title.slice(0, 74)}`
+    : localMsg.media
+      ? (localMsg.media.zeroCopy
+        ? `[Без копии] ${localMsg.media.name}`
+        : localMsg.media.once
+          ? '[1×] Вложение'
+          : localMsg.media.mime?.startsWith('audio/')
+            ? 'Голосовое сообщение'
+            : localMsg.media.mime?.startsWith('video/')
+              ? `Видео: ${localMsg.media.name || 'клип'}`
+              : localMsg.media.mime?.startsWith('image/')
+                ? `Фото: ${localMsg.media.name || 'снимок'}`
+                : `[Файл] ${localMsg.media.name}`)
+      : trimmed.slice(0, 90);
   notifyStore();
+
+  // Локальное «Избранное»: сохраняется строго на телефоне без сетевых запросов
+  if (chat.kind === 'favorites') {
+    if (store.settings.sound !== false && store.settings.outgoingSound !== false) {
+      playSfx('sent', store.settings.soundProfile || 'crystal');
+    }
+    triggerHaptic('tap');
+    await persistChatsAndMessages();
+    notifyStore();
+    return localMsg;
+  }
 
   // Специальная обработка локального канала Эхо-проверки E2EE
   if (chat.kind === 'echo') {
-    const res = await cryptoWorker.call('loopbackSelfTest', { text: trimmed || '[Файл E2EE]' });
+    const probeLabel = localMsg.article?.title
+      ? `[Статья] ${localMsg.article.title}`
+      : (trimmed || '[Файл E2EE]');
+    const res = await cryptoWorker.call('loopbackSelfTest', { text: probeLabel });
     store.meshStats.packetsSent += 1;
     store.meshStats.packetsReceived += 1;
     recordRttSample(res.elapsedMs);
@@ -2944,7 +3026,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
       status: 'delivered',
     };
     list.push(echoReply);
-    chat.lastPreview = `Эхо OK (${res.elapsedMs} мс): ${trimmed.slice(0, 60)}`;
+    chat.lastPreview = `Эхо OK (${res.elapsedMs} мс): ${probeLabel.slice(0, 60)}`;
     chat.lastTs = echoReply.ts;
     if (store.settings.sound !== false && store.settings.outgoingSound !== false) {
       playSfx('sent', store.settings.soundProfile || 'crystal');
@@ -2952,7 +3034,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     triggerHaptic('tap');
     await persistChatsAndMessages();
     notifyStore();
-    return;
+    return localMsg;
   }
 
   const wirePayload = {
@@ -2961,6 +3043,7 @@ export async function sendChatMessage(chatId, text, extra = {}) {
     text: trimmed,
     replyTo: replyObj,
     media: extra.media || null,
+    article: extra.article || null,
     ttlSec,
     senderProfile: buildCompactProfileCard(),
     replyMailbox: {
@@ -3119,6 +3202,14 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
   if (!chat) return;
 
   try {
+    // В «Избранном» свежие записи с камеры/микрофона сохраняются только на устройстве без отправки на сервер
+    if (chat.kind === 'favorites') {
+      const localMedia = await saveLocalCapturedBlob(file);
+      await sendChatMessage(chatId, caption, { type: 'media', media: localMedia });
+      showToast('Сохранено локально в «Избранное»');
+      return;
+    }
+
     showToast(`Шифрование "${file.name}" (AES-256-GCM)…`);
     const rawBuf = new Uint8Array(await file.arrayBuffer());
     const { encryptedBytes, descriptor } = await cryptoWorker.call(
@@ -3133,9 +3224,11 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
     if (chat.kind === 'echo') {
       const blobId = `local_${toBase64Url(randomBytes(8))}`;
       const plainCopy = await cryptoWorker.call('decryptFile', { bytes: encryptedBytes, descriptor });
-      store.decryptedMediaUrls[blobId] = URL.createObjectURL(
-        new Blob([plainCopy], { type: descriptor.mime || 'application/octet-stream' })
-      );
+      if (typeof URL !== 'undefined' && URL.createObjectURL) {
+        store.decryptedMediaUrls[blobId] = URL.createObjectURL(
+          new Blob([plainCopy], { type: descriptor.mime || 'application/octet-stream' })
+        );
+      }
       await sendChatMessage(chatId, caption || `Файл проверен: ${descriptor.name}`, {
         type: 'media',
         media: {
@@ -3164,6 +3257,10 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
     const up = await res.json();
     if (!res.ok || up.error) throw new Error(up.error || 'Не удалось загрузить шифроблоб');
 
+    if (typeof URL !== 'undefined' && URL.createObjectURL && !once) {
+      store.decryptedMediaUrls[up.blobId] = URL.createObjectURL(file);
+    }
+
     const mediaPayload = {
       blobId: up.blobId,
       burnToken: up.burnToken || null,
@@ -3178,6 +3275,156 @@ export async function sendEncryptedAttachment(chatId, file, { once = false, capt
   } catch (err) {
     showToast(err.message, 'err');
   }
+}
+
+/**
+ * Добавляет файлы/фото/видео с устройства в локальное «Избранное» БЕЗ создания копии (Zero-Copy):
+ * сохраняется исключительно ссылка на исходное расположение файла на телефоне/диске.
+ */
+export async function addZeroCopyItemsToFavorites(items, { caption = '' } = {}) {
+  if (!Array.isArray(items) || !items.length) return [];
+  if (!store.chats[FAVORITES_CHAT_ID]) {
+    store.chats = ensureSystemChats(store.chats, store.me?.username || '');
+    store.messages = ensureSystemMessages(store.messages, store.me?.username || '');
+  }
+  const added = [];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (!it) continue;
+    const mediaRef = {
+      zeroCopy: true,
+      refKind: it.refKind || (it.localRefUri || it.uri ? 'android-uri' : 'fs-handle'),
+      localRefUri: it.localRefUri || it.uri || '',
+      fsHandleId: it.fsHandleId || '',
+      name: it.name || 'file',
+      mime: it.mime || 'application/octet-stream',
+      size: Number(it.size) || 0,
+      durationMs: Number(it.durationMs) || 0,
+    };
+    const msg = await sendChatMessage(FAVORITES_CHAT_ID, i === 0 ? caption : '', {
+      type: 'media',
+      media: mediaRef,
+    });
+    if (msg) added.push(msg);
+  }
+  if (added.length) {
+    showToast(
+      added.length === 1
+        ? `Ссылка на «${added[0].media.name}» добавлена без копии`
+        : `Добавлено ссылок без копирования: ${added.length}`
+    );
+  }
+  return added;
+}
+
+/**
+ * Универсальная отправка вложения из меню скрепки:
+ * - в «Избранном» сохраняет прямую ссылку без копии (для файлов с телефона) или локальный снимок камеры;
+ * - в остальных чатах шифрует вложение по AES-256-GCM и отправляет собеседнику.
+ */
+export async function sendSmartAttachment(chatId, itemOrFile, { caption = '', once = false } = {}) {
+  const chat = store.chats[chatId];
+  if (!chat || !itemOrFile) return;
+
+  if (chat.kind === 'favorites') {
+    if (itemOrFile.zeroCopy || itemOrFile.localRefUri || itemOrFile.uri || itemOrFile.fsHandleId) {
+      await addZeroCopyItemsToFavorites([itemOrFile], { caption });
+      return;
+    }
+    if (typeof File !== 'undefined' && itemOrFile instanceof File) {
+      await sendEncryptedAttachment(chatId, itemOrFile, { once: false, caption });
+      return;
+    }
+  }
+
+  // Обычный чат (DM / Эхо): если элемент выбран из встроенной Android-галереи по URI, читаем поток и шифруем
+  if (itemOrFile.uri && !(typeof File !== 'undefined' && itemOrFile instanceof File)) {
+    const asFile = await readAndroidUriAsFile(itemOrFile);
+    await sendEncryptedAttachment(chatId, asFile, { once, caption });
+    return;
+  }
+
+  await sendEncryptedAttachment(chatId, itemOrFile, { once, caption });
+}
+
+/**
+ * Публикует форматированную статью прямо внутри чата (Telegraph / Instant View стиль).
+ * Работает как в локальном «Избранном», так и в сквозном шифровании Double Ratchet с собеседником.
+ */
+export async function sendArticleMessage(chatId, articleInput = {}) {
+  const chat = store.chats[chatId];
+  if (!chat) return null;
+
+  const title = String(articleInput.title || '').trim().slice(0, 180);
+  const subtitle = String(articleInput.subtitle || '').trim().slice(0, 280);
+  const body = String(articleInput.body || '').trim().slice(0, 32000);
+  if (!title) throw new Error('Укажите заголовок статьи');
+  if (!body) throw new Error('Напишите текст статьи');
+
+  const words = body.split(/\s+/).filter(Boolean).length;
+  const readingMinutes = Math.max(1, Math.ceil(words / 180));
+  const authorName =
+    store.profile?.displayName ||
+    (store.me?.username ? `@${store.me.username}` : 'Автор');
+
+  const article = {
+    id: `art_${toBase64Url(randomBytes(8))}`,
+    title,
+    subtitle,
+    body,
+    coverDataUrl: chat.kind !== 'favorites'
+      ? String(articleInput.coverDataUrl || '').slice(0, 260000)
+      : String(articleInput.coverDataUrl || '').slice(0, 350000),
+    coverZeroCopyRef: chat.kind === 'favorites' ? (articleInput.coverZeroCopyRef || null) : null,
+    authorName,
+    wordCount: words,
+    readingMinutes,
+    publishedAt: Date.now(),
+  };
+
+  const sent = await sendChatMessage(chatId, subtitle || title, {
+    type: 'article',
+    article,
+  });
+  showToast(chat.kind === 'favorites' ? 'Статья сохранена в «Избранное»' : 'Статья зашифрована и отправлена');
+  return sent;
+}
+
+/** Сохраняет любое сообщение, статью или вложение из любого чата в локальное «Избранное» */
+export async function saveMessageToFavorites(sourceChatId, msgId) {
+  const list = store.messages[sourceChatId] || [];
+  const src = list.find((m) => m.id === msgId);
+  if (!src) return null;
+  if (sourceChatId === FAVORITES_CHAT_ID) {
+    showToast('Сообщение уже находится в «Избранном»');
+    return src;
+  }
+
+  if (!store.chats[FAVORITES_CHAT_ID]) {
+    store.chats = ensureSystemChats(store.chats, store.me?.username || '');
+    store.messages = ensureSystemMessages(store.messages, store.me?.username || '');
+  }
+
+  const fromTitle = store.chats[sourceChatId]?.title || 'Диалог';
+  let mediaCopy = src.media ? { ...src.media } : null;
+  if (mediaCopy && !mediaCopy.zeroCopy && mediaCopy.blobId && store.decryptedMediaUrls[mediaCopy.blobId]) {
+    try {
+      const r = await fetch(store.decryptedMediaUrls[mediaCopy.blobId]);
+      const b = await r.blob();
+      const f = new File([b], mediaCopy.name || 'saved_file', { type: mediaCopy.mime || b.type });
+      mediaCopy = await saveLocalCapturedBlob(f);
+    } catch {
+      // Если объектный URL уже освобождён — сохраняем дескриптор для расшифровки по запросу
+    }
+  }
+  const saved = await sendChatMessage(FAVORITES_CHAT_ID, src.text || '', {
+    type: src.type || 'text',
+    media: mediaCopy,
+    article: src.article ? { ...src.article } : null,
+    forwardedFrom: fromTitle,
+  });
+  showToast('Сохранено в локальное «Избранное»');
+  return saved;
 }
 
 export async function openEncryptedMedia(msg) {

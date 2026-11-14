@@ -1,13 +1,15 @@
-// Автономный Service Worker MeshChat v1.7 (build 8).
+// Автономный Service Worker MeshChat v2.1 (build 12).
 // Кеширует только неизменяемую оболочку приложения (HTML/CSS/JS/WASM) для мгновенного старта офлайн.
-// Никогда не кеширует /api/*, /downloads/* или зашифрованные вложения.
+// Никогда не кеширует /api/*, /local-ref, /downloads/* или зашифрованные вложения.
 
-const CACHE_NAME = 'meshchat-shell-v11';
+const CACHE_NAME = 'meshchat-shell-v12';
 const CORE_SHELL = [
   '/',
   '/index.html',
-  '/css/app.css?v=11',
-  '/js/app.mjs?v=11',
+  '/css/app.css?v=12',
+  '/js/app.mjs?v=12',
+  '/js/store/local-ref-store.mjs',
+  '/js/ui/attachment-sheet.mjs',
   '/js/ui/atmosphere-layer.mjs',
   '/js/ui/settings-sections.mjs',
   '/js/transport/voice-relay-audio.mjs',
@@ -35,7 +37,12 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/downloads/') || url.pathname.startsWith('/q/')) {
+  if (
+    url.pathname === '/local-ref' ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/downloads/') ||
+    url.pathname.startsWith('/q/')
+  ) {
     return;
   }
 
