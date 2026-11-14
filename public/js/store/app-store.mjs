@@ -42,8 +42,8 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.8.0';
-export const APP_VERSION_CODE = 9;
+export const APP_VERSION = '1.9.0';
+export const APP_VERSION_CODE = 10;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -535,17 +535,43 @@ export const DEFAULT_SETTINGS = {
   defaultTtlSec: 0,           // 0 | 30 | 300 | 3600 | 86400 | 604800
   timeFormat: '24h',          // '24h' | '24h_sec' | '12h'
   showChatAvatars: true,
-  doubleTapAction: 'reply',   // 'reply' | 'copy' | 'react' | 'none'
+  doubleTapAction: 'react',   // 'reply' | 'copy' | 'react' | 'none'
   autoDecryptMedia: 'always', // 'always' | '1mb' | 'manual'
+  mediaImageQuality: 'hd',    // 'original' | 'hd' | 'saver'
+  ramCacheLimitMb: 64,        // 16 | 64 | 128 | 0
+  autoPurgeCacheMinutes: 0,   // 0 | 5 | 15 | -1 (при сворачивании)
   confirmCall: false,
   spellcheck: true,
   sendReadReceipts: true,
   sendTypingIndicators: true,
+  swipeToReply: true,
+  autoSaveDrafts: true,
+  linkPreviewHint: true,
+  voicePlaybackRate: 1,       // 1 | 1.25 | 1.5 | 2
+  chatListLines: 2,           // 1 | 2 | 3
+
+  // Стикеры, эмодзи и быстрые реакции
+  quickReactionEmoji: '❄️',
+  reactionPack: 'winter',     // 'winter' | 'classic' | 'cyber'
+  largeSingleEmoji: true,
+  animateReactions: true,
+  composerEmojiBar: false,
+
+  // Папки с чатами
+  enabledSystemFolders: ['unread', 'dm', 'verified', 'pinned', 'ask'],
+  customFolders: [],          // [{ id, title, icon, chatIds: [] }]
+  showFolderCounts: true,
+  compactFolderTabs: false,
 
   // Приватность, PIN-блокировка и маскировка экрана
   pinHashB64: '',
   pinSaltB64: '',
   autoLockMinutes: 0,         // 0 | 1 | 5 | 15 | 30
+  lockOnBackground: false,
+  incognitoKeyboard: false,
+  hideOnlinePresence: false,
+  blurMediaInChat: false,
+  previewInList: true,
   clipboardAutoClearSec: 0,   // 0 | 15 | 30 | 60
   shareProfileE2ee: true,
   acceptAnonGateway: true,
@@ -554,12 +580,74 @@ export const DEFAULT_SETTINGS = {
   bossTemplate: 'xlsx',       // 'xlsx' | 'terminal' | 'notes'
   bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
 
-  // Звук и тактильная отдача
+  // Уведомления, звук и тихие часы
   sound: true,
   outgoingSound: true,
-  soundProfile: 'crystal',    // 'crystal' | 'pulse' | 'sonar' | 'soft'
+  inAppBannerToast: true,
+  soundProfile: 'crystal',    // 'crystal' | 'chime' | 'pulse' | 'sonar' | 'soft'
+  callRingtone: 'northern',   // 'northern' | 'classic' | 'pulse' | 'silent'
+  unreadCounterMode: 'unmuted', // 'all' | 'unmuted' | 'off'
+  quietHoursEnabled: false,
+  quietHoursRange: '23-07',   // '23-07' | '22-08' | '00-08'
   haptics: 'soft',            // 'off' | 'soft' | 'strong'
+
+  // Энергосбережение
+  powerSaveMode: 'auto20',    // 'off' | 'auto20' | 'auto35' | 'always'
+  powerPauseSnow: true,
+  powerPauseGarland: true,
+  powerDisableBlur: true,
+  powerReduceFps: true,
+  powerSlowSync: true,
+
+  // Язык и региональные форматы
+  appLanguage: 'ru',          // 'ru' | 'en'
+  weekStartsMonday: true,
+  byteUnits: 'si',            // 'si' | 'iec'
 };
+
+export const REACTION_PACKS = {
+  winter: {
+    id: 'winter',
+    label: 'Зимний и новогодний',
+    emojis: ['❄️', '🎄', '✨', '🎉', '❤️', '👍'],
+  },
+  classic: {
+    id: 'classic',
+    label: 'Классический набор',
+    emojis: ['👍', '❤️', '🔥', '👏', '😊', '👀'],
+  },
+  cyber: {
+    id: 'cyber',
+    label: 'Инженерный контур',
+    emojis: ['⚡', '🛡️', '✅', '📌', '💡', '🤝'],
+  },
+};
+
+export const COMPOSER_QUICK_EMOJIS = ['❄️', '🎄', '✨', '🎁', '☃️', '🥂', '❤️', '🔥', '👍', '⚡', '🛡️', '🎉'];
+
+const UI_STRINGS = {
+  ru: {
+    chats: 'Чаты',
+    contacts: 'Контакты',
+    mesh: 'Mesh',
+    profile: 'Профиль',
+    settings: 'Настройки',
+    langName: 'Русский',
+  },
+  en: {
+    chats: 'Chats',
+    contacts: 'Contacts',
+    mesh: 'Mesh',
+    profile: 'Profile',
+    settings: 'Settings',
+    langName: 'English',
+  },
+};
+
+export function uiText(key) {
+  const lang = store.settings?.appLanguage === 'en' ? 'en' : 'ru';
+  return UI_STRINGS[lang]?.[key] || UI_STRINGS.ru[key] || key;
+}
 export const store = {
   booting: true,
   busy: false,
@@ -633,17 +721,26 @@ export const store = {
   // Данные чатов и сообщений (расшифровываются из IndexedDB только в ОЗУ)
   chats: {},
   messages: {},
+  drafts: {},
   outbox: [],
   decryptedMediaUrls: {},
   decryptedMediaBytes: {},
   typingByChat: {},
   call: null,
+  battery: {
+    supported: false,
+    level: 1,
+    charging: true,
+  },
 
   // Состояние интерфейса (5 разделов: Чаты, Контакты, Mesh, Профиль, Настройки)
   ui: {
     navTab: 'chats',
     spaceFilter: 'all',
     settingsCategory: 'all',
+    settingsSection: null,
+    settingsSearchOpen: false,
+    settingsMenuOpen: false,
     mobileTab: 'chats',
     activeChatId: null,
     inspectorOpen: false,
@@ -698,6 +795,30 @@ export function showToast(text, kind = 'info') {
 export function dismissToast(id) {
   store.ui.toasts = store.ui.toasts.filter((t) => t.id !== id);
   notifyStore();
+}
+
+/** Определяет, активен ли сейчас режим энергосбережения */
+export function isPowerSavingActive() {
+  const mode = store.settings?.powerSaveMode || 'off';
+  if (mode === 'always') return true;
+  if (mode === 'off') return false;
+  if (!store.battery?.supported || store.battery?.charging) return false;
+  const pct = Math.round((store.battery.level ?? 1) * 100);
+  if (mode === 'auto35') return pct <= 35;
+  return pct <= 20;
+}
+
+/** Проверяет, попадает ли текущее локальное время в тихие часы «Не беспокоить» */
+export function isQuietHoursNow() {
+  if (!store.settings?.quietHoursEnabled) return false;
+  const raw = String(store.settings.quietHoursRange || '23-07');
+  const [sStr, eStr] = raw.split('-');
+  const startH = parseInt(sStr, 10);
+  const endH = parseInt(eStr, 10);
+  if (!Number.isFinite(startH) || !Number.isFinite(endH)) return false;
+  const h = new Date().getHours();
+  if (startH <= endH) return h >= startH && h < endH;
+  return h >= startH || h < endH;
 }
 
 /** Применяет выбранную тему, градиенты, снежные эффекты, шрифт и плотность к CSS-переменным документа */
@@ -755,16 +876,18 @@ export function applyThemeToDom() {
   root.setProperty('--bubble-radius', `${Number(t.bubbleRadius) || 16}px`);
   root.setProperty('--msg-font-size', `${Number(t.fontScale) || 14}px`);
   root.setProperty('--font-ui', fontStack);
+  root.setProperty('--chat-preview-lines', String(Math.max(1, Math.min(3, Number(store.settings?.chatListLines) || 2))));
 
+  const pwrSave = isPowerSavingActive();
   const ds = document.documentElement.dataset;
   if (ds) {
     ds.backdrop = t.chatBackdrop || 'snowflakes';
     ds.density = t.density || 'normal';
     ds.motion = t.animations === false ? 'reduced' : 'full';
     ds.tails = t.messageTail === false ? 'off' : 'on';
-    ds.frost = t.frostGlass === false ? 'off' : 'on';
+    ds.frost = t.frostGlass === false || (pwrSave && store.settings?.powerDisableBlur !== false) ? 'off' : 'on';
     ds.snowcaps = t.snowCaps ? 'on' : 'off';
-    ds.garland = t.garlandEnabled ? 'on' : 'off';
+    ds.garland = t.garlandEnabled && !(pwrSave && store.settings?.powerPauseGarland !== false) ? 'on' : 'off';
   }
 
   const metaTheme = document.querySelector?.('meta[name="theme-color"]');
@@ -776,7 +899,7 @@ export function applyThemeToDom() {
 
 export function triggerHaptic(kind = 'tap') {
   const mode = store.settings.haptics || 'soft';
-  if (mode === 'off') return;
+  if (mode === 'off' || isQuietHoursNow()) return;
   const ms = mode === 'strong' ? (kind === 'heavy' ? 36 : 24) : (kind === 'heavy' ? 20 : 11);
   try {
     if (globalThis.MeshChatAndroid?.vibrate) {
@@ -1044,6 +1167,23 @@ export function handleBackNavigation() {
     notifyStore();
     return true;
   }
+  if (store.ui.navTab === 'settings') {
+    if (store.ui.settingsMenuOpen) {
+      store.ui.settingsMenuOpen = false;
+      notifyStore();
+      return true;
+    }
+    if (store.ui.settingsSection) {
+      store.ui.settingsSection = null;
+      notifyStore();
+      return true;
+    }
+    if (store.ui.settingsSearchOpen) {
+      store.ui.settingsSearchOpen = false;
+      notifyStore();
+      return true;
+    }
+  }
   const isMobileViewport =
     Boolean(globalThis.MeshChatAndroid) ||
     (typeof window !== 'undefined' && window.innerWidth <= 860);
@@ -1179,7 +1319,10 @@ let autoLockTimer = null;
 
 function restartSyncLoop() {
   clearInterval(syncLoopTimer);
-  const sec = Math.max(2, Number(store.settings.syncIntervalSec) || 6);
+  const baseSec = Math.max(2, Number(store.settings.syncIntervalSec) || 6);
+  const sec = isPowerSavingActive() && store.settings.powerSlowSync !== false
+    ? Math.max(baseSec, baseSec * 2)
+    : baseSec;
   syncLoopTimer = setInterval(() => {
     if (!store.me) return;
     if (!activeTransport?.isConnected) {
@@ -1202,8 +1345,49 @@ function startAutoLockWatchdog() {
   window.addEventListener?.('pointerdown', markActive, { passive: true });
   window.addEventListener?.('keydown', markActive, { passive: true });
 
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden || !store.me) return;
+      if (store.settings.lockOnBackground) {
+        if (store.settings.pinHashB64) {
+          store.ui.pinLocked = true;
+          if (store.settings.strictBossWipe) cryptoWorker.call('lockRamCache').catch(() => {});
+          notifyStore();
+        } else {
+          toggleBossMode(true);
+        }
+      }
+      if (Number(store.settings.autoPurgeCacheMinutes) === -1) {
+        clearDecryptedMediaCache();
+      }
+    });
+  }
+
+  if (typeof navigator !== 'undefined' && typeof navigator.getBattery === 'function') {
+    navigator.getBattery().then((bat) => {
+      const syncBat = () => {
+        store.battery = {
+          supported: true,
+          level: Number.isFinite(bat.level) ? bat.level : 1,
+          charging: Boolean(bat.charging),
+        };
+        applyThemeToDom();
+        notifyStore();
+      };
+      syncBat();
+      bat.addEventListener?.('levelchange', syncBat);
+      bat.addEventListener?.('chargingchange', syncBat);
+    }).catch(() => {});
+  }
+
   clearInterval(autoLockTimer);
   autoLockTimer = setInterval(() => {
+    const purgeMins = Number(store.settings.autoPurgeCacheMinutes) || 0;
+    if (purgeMins > 0 && Object.keys(store.decryptedMediaUrls).length > 0) {
+      if (Date.now() - lastUserActivityAt >= purgeMins * 60_000) {
+        clearDecryptedMediaCache();
+      }
+    }
     const mins = Number(store.settings.autoLockMinutes) || 0;
     if (!mins || !store.me) return;
     if (Date.now() - lastUserActivityAt >= mins * 60_000) {
@@ -1226,12 +1410,14 @@ export async function bootClientApp() {
     await clientDb.open();
     const workerState = await cryptoWorker.call('init');
 
-    const [savedSettings, savedTheme, savedProfile] = await Promise.all([
+    const [savedSettings, savedTheme, savedProfile, savedDrafts] = await Promise.all([
       clientDb.get('settings', null),
       clientDb.get('theme', null),
       clientDb.get('profile', null),
+      clientDb.get('drafts', null),
     ]);
     if (savedSettings) Object.assign(store.settings, savedSettings);
+    if (savedDrafts && typeof savedDrafts === 'object') store.drafts = savedDrafts;
     if (savedTheme) {
       Object.assign(store.theme, savedTheme);
       // Однократная активация зимней атмосферы и градиентов при обновлении до v1.8
@@ -2062,13 +2248,17 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
   msg.readSent = receiptKind === 'read';
   deliverPayloadToPeer(chat, { type: 'receipt', kind: receiptKind, msgIds: [msg.id] }).catch(() => {});
 
-  if (!chat.muted && !store.ui.bossActive && !store.ui.pinLocked) {
+  if (!chat.muted && !store.ui.bossActive && !store.ui.pinLocked && !isQuietHoursNow()) {
     if (store.settings.sound !== false) {
       playSfx('incoming', store.settings.soundProfile || 'crystal');
     }
     triggerHaptic('heavy');
   }
-  if (!chat.muted) {
+  if (!chat.muted && !isChatVisible && store.settings.inAppBannerToast !== false && !store.ui.bossActive && !store.ui.pinLocked) {
+    const senderLabel = chat.peerProfile?.displayName || chat.title;
+    showToast(`${senderLabel}: ${(chat.lastPreview || 'Новое сообщение').slice(0, 56)}`);
+  }
+  if (!chat.muted && !isQuietHoursNow()) {
     emitBackgroundNotification(chat.peerProfile?.displayName || chat.title, chat.lastPreview);
   }
 
@@ -3085,10 +3275,15 @@ export async function updateClientSettings(patch) {
     }).catch(() => {});
   }
 
-  if (patch.syncIntervalSec !== undefined) {
+  if (
+    patch.syncIntervalSec !== undefined ||
+    patch.powerSaveMode !== undefined ||
+    patch.powerSlowSync !== undefined
+  ) {
     restartSyncLoop();
   }
 
+  applyThemeToDom();
   await clientDb.set('settings', store.settings);
   notifyStore();
 
@@ -3425,8 +3620,8 @@ const callManager = new E2eeCallManager({
   },
   onRingTick: () => {
     const chat = store.chats[callManager.state.chatId];
-    if (!chat?.muted && !store.ui.bossActive && !store.ui.pinLocked) {
-      if (store.settings.sound !== false) playSfx('ring');
+    if (!chat?.muted && !store.ui.bossActive && !store.ui.pinLocked && !isQuietHoursNow()) {
+      if (store.settings.sound !== false) playSfx('ring', store.settings.callRingtone || 'northern');
       triggerHaptic('heavy');
     }
   },
@@ -3496,3 +3691,86 @@ export async function requestSystemNotificationAccess() {
     showToast(perm === 'granted' ? 'Системные уведомления разрешены' : 'Уведомления отклонены браузером');
   }
 }
+
+// ─────────────── Разделы настроек, пользовательские папки чатов и черновики v1.9 ───────────────
+
+export function openSettingsSection(sectionId) {
+  store.ui.settingsSection = sectionId || null;
+  store.ui.settingsMenuOpen = false;
+  triggerHaptic('tap');
+  notifyStore();
+}
+
+export function closeSettingsSection() {
+  store.ui.settingsSection = null;
+  store.ui.settingsMenuOpen = false;
+  triggerHaptic('tap');
+  notifyStore();
+}
+
+export async function toggleSystemChatFolder(folderId) {
+  const cur = Array.isArray(store.settings.enabledSystemFolders)
+    ? [...store.settings.enabledSystemFolders]
+    : ['unread', 'dm', 'verified', 'pinned', 'ask'];
+  const idx = cur.indexOf(folderId);
+  if (idx >= 0) cur.splice(idx, 1);
+  else cur.push(folderId);
+  if (store.ui.spaceFilter === folderId && idx >= 0) {
+    store.ui.spaceFilter = 'all';
+  }
+  await updateClientSettings({ enabledSystemFolders: cur });
+}
+
+export async function createCustomChatFolder(title, chatIds = []) {
+  const clean = String(title || '').trim().slice(0, 24);
+  if (!clean) {
+    showToast('Введите название папки чатов', 'err');
+    return null;
+  }
+  const cur = Array.isArray(store.settings.customFolders) ? [...store.settings.customFolders] : [];
+  if (cur.length >= 12) {
+    showToast('Достигнут лимит пользовательских папок (12)', 'err');
+    return null;
+  }
+  const folder = {
+    id: `fld_${toBase64Url(randomBytes(5))}`,
+    title: clean,
+    chatIds: Array.isArray(chatIds) ? [...new Set(chatIds)] : [],
+  };
+  cur.push(folder);
+  await updateClientSettings({ customFolders: cur });
+  showToast(`Создана папка «${clean}»`);
+  return folder;
+}
+
+export async function deleteCustomChatFolder(folderId) {
+  const cur = Array.isArray(store.settings.customFolders) ? store.settings.customFolders : [];
+  const next = cur.filter((f) => f.id !== folderId);
+  if (store.ui.spaceFilter === folderId) {
+    store.ui.spaceFilter = 'all';
+  }
+  await updateClientSettings({ customFolders: next });
+  showToast('Папка удалена (диалоги сохранены)');
+}
+
+export async function toggleChatInFolder(folderId, chatId) {
+  const cur = Array.isArray(store.settings.customFolders)
+    ? store.settings.customFolders.map((f) => ({ ...f, chatIds: [...(f.chatIds || [])] }))
+    : [];
+  const folder = cur.find((f) => f.id === folderId);
+  if (!folder) return;
+  const idx = folder.chatIds.indexOf(chatId);
+  if (idx >= 0) folder.chatIds.splice(idx, 1);
+  else folder.chatIds.push(chatId);
+  await updateClientSettings({ customFolders: cur });
+}
+
+export function saveChatDraft(chatId, text) {
+  if (!chatId) return;
+  if (store.settings.autoSaveDrafts === false) return;
+  const val = String(text || '');
+  if (val) store.drafts[chatId] = val;
+  else delete store.drafts[chatId];
+  clientDb.set('drafts', store.drafts).catch(() => {});
+}
+

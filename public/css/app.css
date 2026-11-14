@@ -3474,5 +3474,482 @@ html[data-backdrop="festive_gold"] .messages-scroll {
   .mood-packs-grid { grid-template-columns: 1fr; }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   MeshChat v1.9: Многораздельный центр «Настройки» (Хаб 11 категорий + подразделы)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.settings-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(10, 15, 28, 0.62);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 8;
+}
+html[data-garland="on"] .settings-top-bar {
+  padding-top: 24px;
+}
+
+.settings-bar-center-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-main);
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.settings-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.settings-bar-icon-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+.settings-bar-icon-btn:hover,
+.settings-bar-icon-btn.active {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+
+.settings-subbar-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.settings-subbar-title h1 {
+  margin: 0;
+  font-size: 17.5px;
+  font-weight: 700;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-overflow-anchor {
+  position: relative;
+}
+.settings-overflow-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 232px;
+  background: var(--bg-2);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 16px;
+  padding: 6px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.58);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 40;
+}
+.settings-overflow-menu button {
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 10px 12px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.settings-overflow-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.settings-search-drawer {
+  padding: 10px 14px 4px;
+  flex-shrink: 0;
+}
+
+.settings-hub-scroll {
+  padding: 10px 12px 26px !important;
+}
+
+.settings-hub-list,
+.settings-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-hub-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.13);
+  background: rgba(20, 28, 44, 0.72);
+  color: var(--text-main);
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.14s ease, background 0.16s ease, border-color 0.16s ease;
+}
+html[data-frost="on"] .settings-hub-card {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.settings-hub-card:hover {
+  background: rgba(30, 41, 64, 0.84);
+  border-color: rgba(148, 163, 184, 0.28);
+}
+.settings-hub-card:active {
+  transform: scale(0.992);
+}
+.settings-hub-card.active {
+  background: linear-gradient(135deg, var(--accent-soft), rgba(24, 34, 56, 0.9));
+  border-color: var(--accent);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.settings-pastel-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.settings-pastel-circle.mini {
+  width: 30px;
+  height: 30px;
+}
+
+.settings-hub-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.settings-hub-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f8fafc;
+  line-height: 1.25;
+}
+.settings-hub-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.32;
+}
+.settings-hub-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+.settings-hub-chevron {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Двухпанельный Master-Detail режим для широких мониторов ПК */
+.settings-master-detail {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 0;
+}
+.settings-master-col {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 28px;
+  border-right: 1px solid rgba(148, 163, 184, 0.14);
+}
+.settings-detail-col {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 22px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.settings-detail-hero h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.settings-sub-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex-shrink: 0;
+}
+.settings-detail-scroll {
+  padding: 12px 12px 28px !important;
+}
+
+/* Карточка аккаунта, устройств, папок, реакций и энергосбережения */
+.account-hero-banner {
+  border-radius: 16px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.account-hero-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.account-avatar-Trigger { cursor: pointer; flex-shrink: 0; }
+.account-hero-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.account-hero-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.account-hero-handle { font-size: 12.5px; color: rgba(226, 232, 240, 0.84); }
+.account-hero-status { font-size: 12.5px; color: rgba(186, 230, 253, 0.95); }
+
+.kv-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kv-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 11px;
+  background: rgba(8, 12, 22, 0.45);
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.kv-info-row span { color: var(--text-muted); }
+.kv-info-row code { font-size: 12.5px; color: var(--text-main); }
+
+.emoji-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+.emoji-pick-btn {
+  height: 44px;
+  border-radius: 13px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-2);
+  font-size: 21px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.14s ease, border-color 0.14s ease;
+}
+.emoji-pick-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: scale(1.05);
+}
+
+.folder-chats-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.folder-chat-pick-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-2);
+  font-size: 13.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.folder-chat-pick-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.folder-check-mark {
+  font-weight: 700;
+  color: var(--accent);
+}
+.custom-folder-manage-card {
+  padding: 11px 12px;
+  border-radius: 13px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(12, 17, 29, 0.55);
+}
+.custom-folder-manage-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.power-status-banner,
+.active-device-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(99, 102, 241, 0.12));
+  border: 1px solid rgba(125, 211, 252, 0.24);
+}
+.power-status-banner b,
+.device-banner-info b {
+  display: block;
+  font-size: 14px;
+  color: var(--text-main);
+}
+.power-status-banner span,
+.device-banner-info span {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.device-icon-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.device-banner-info { flex: 1; min-width: 0; }
+.probe-result-pill {
+  padding: 9px 12px;
+  border-radius: 11px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.32);
+  color: #a7f3d0;
+  font-size: 12.5px;
+}
+
+/* Улучшения чата v1.9: джамбо-эмодзи, размытие фото, скорость аудио, быстрые эмодзи и папки */
+.msg-jumbo-emoji {
+  font-size: 36px !important;
+  line-height: 1.18 !important;
+  padding: 4px 2px;
+}
+.decrypted-img.privacy-blurred {
+  filter: blur(18px) brightness(0.85);
+  cursor: pointer;
+  transition: filter 0.22s ease;
+}
+.voice-rate-pill {
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(8, 12, 22, 0.48);
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.composer-emoji-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.composer-emoji-strip::-webkit-scrollbar { display: none; }
+.composer-emoji-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--border-subtle);
+  background: rgba(15, 23, 42, 0.65);
+  border-radius: 10px;
+  padding: 4px 9px;
+  font-size: 17px;
+  cursor: pointer;
+}
+.filter-pills-scroll.compact .filter-pill {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.custom-folder-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.folder-cfg-pill {
+  padding: 6px 10px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: var(--chat-preview-lines, 2);
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
+
+/* Активная пилюля на иконке нижней панели навигации как в референсе */
+.bottom-nav-btn.active .bottom-nav-icon {
+  background: rgba(56, 189, 248, 0.18);
+  padding: 4px 16px;
+  border-radius: 999px;
+}
+
+@media (min-width: 1080px) {
+  .settings-screen.tab-screen {
+    max-width: 1180px;
+  }
+}
+
+
+
 
 

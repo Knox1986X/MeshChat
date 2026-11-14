@@ -41,8 +41,32 @@ export function playSfx(kind, profile = 'crystal') {
       return;
     }
     if (kind === 'ring') {
+      if (profile === 'silent') return;
+      if (profile === 'northern') {
+        synthTone(659.25, 0, 0.16, { gain: 0.05 });
+        synthTone(880, 0.17, 0.18, { gain: 0.05 });
+        synthTone(1046.5, 0.35, 0.24, { gain: 0.045 });
+        return;
+      }
+      if (profile === 'pulse') {
+        synthTone(523.25, 0, 0.12, { type: 'triangle', gain: 0.055 });
+        synthTone(783.99, 0.15, 0.18, { type: 'triangle', gain: 0.05 });
+        return;
+      }
       synthTone(587.33, 0, 0.22, { gain: 0.055 });
       synthTone(880, 0.24, 0.28, { gain: 0.05 });
+      return;
+    }
+    if (profile === 'chime') {
+      if (kind === 'sent') {
+        synthTone(784, 0, 0.055, { endFreq: 1046.5, gain: 0.036 });
+      } else if (kind === 'incoming') {
+        synthTone(659.25, 0, 0.075, { gain: 0.048 });
+        synthTone(987.77, 0.075, 0.09, { gain: 0.046 });
+        synthTone(1318.5, 0.16, 0.14, { gain: 0.04 });
+      } else if (kind === 'burn') {
+        synthTone(440, 0, 0.1, { type: 'triangle', endFreq: 220, gain: 0.04 });
+      }
       return;
     }
     if (profile === 'soft') {
@@ -106,11 +130,14 @@ export function formatDatePill(ts) {
   return `${WEEKDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
-export function formatBytes(bytes) {
+export function formatBytes(bytes, unitMode = 'si') {
   if (!bytes) return '0 Б';
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / 1048576).toFixed(1)} МБ`;
+  const base = unitMode === 'iec' ? 1024 : 1000;
+  const kLabel = unitMode === 'iec' ? 'КиБ' : 'КБ';
+  const mLabel = unitMode === 'iec' ? 'МиБ' : 'МБ';
+  if (bytes < base) return `${bytes} Б`;
+  if (bytes < base * base) return `${(bytes / base).toFixed(1)} ${kLabel}`;
+  return `${(bytes / (base * base)).toFixed(1)} ${mLabel}`;
 }
 
 export const TTL_CHOICES = [
@@ -272,6 +299,13 @@ const ICON_PATHS = {
   snowflake: html`<line x1="12" y1="2" x2="12" y2="22"/><line x1="3.34" y1="7" x2="20.66" y2="17"/><line x1="20.66" y1="7" x2="3.34" y2="17"/><polyline points="9.5 4.5 12 7 14.5 4.5"/><polyline points="9.5 19.5 12 17 14.5 19.5"/><polyline points="4.5 10.2 7.5 9.4 6.7 6.4"/><polyline points="17.3 17.6 16.5 14.6 19.5 13.8"/><polyline points="19.5 10.2 16.5 9.4 17.3 6.4"/><polyline points="6.7 17.6 7.5 14.6 4.5 13.8"/>`,
   sparkle: html`<path d="m12 3 1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z"/><path d="m19 16 .9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16Z"/>`,
   tree: html`<polygon points="12 2 6.5 9.5 10 9.5 5 15.5 9.2 15.5 4 20.5 20 20.5 14.8 15.5 19 15.5 14 9.5 17.5 9.5 12 2"/><line x1="12" y1="20.5" x2="12" y2="23"/>`,
+  smile: html`<rect x="3" y="3" width="18" height="18" rx="5"/><path d="M8.5 14.5s1.3 2 3.5 2 3.5-2 3.5-2"/><circle cx="9" cy="9.5" r="1" fill="currentColor"/><circle cx="15" cy="9.5" r="1" fill="currentColor"/><path d="M16 3v4a2 2 0 0 0 2 2h3"/>`,
+  pie: html`<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>`,
+  folder: html`<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>`,
+  laptop: html`<rect x="3" y="4" width="18" height="12" rx="2"/><line x1="2" y1="20" x2="22" y2="20"/>`,
+  battery: html`<rect x="2" y="7" width="16" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13" stroke-width="2.4"/><rect x="5" y="10" width="7" height="4" rx="0.8" fill="currentColor"/>`,
+  moreVert: html`<circle cx="12" cy="5" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="19" r="1.6" fill="currentColor"/>`,
+  chevronRight: html`<path d="m9 18 6-6-6-6"/>`,
   mesh: html`<path d="M12 3 4 7v6c0 5 3.4 8.8 8 10 4.6-1.2 8-5 8-10V7l-8-4Z"/><circle cx="12" cy="8.5" r="1.4" fill="currentColor"/><circle cx="8.5" cy="11" r="1.3" fill="currentColor"/><circle cx="15.5" cy="11" r="1.3" fill="currentColor"/><circle cx="9.6" cy="15.2" r="1.3" fill="currentColor"/><circle cx="14.4" cy="15.2" r="1.3" fill="currentColor"/><path d="M8.5 11 12 8.5 15.5 11 14.4 15.2H9.6L8.5 11Z" stroke-width="1.3"/>`,
 };
 

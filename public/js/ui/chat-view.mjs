@@ -7,6 +7,10 @@ import { html, useState, useRef, useEffect } from '../../vendor/preact.mjs';
 import {
   store,
   notifyStore,
+  REACTION_PACKS,
+  COMPOSER_QUICK_EMOJIS,
+  updateClientSettings,
+  saveChatDraft,
   sendChatMessage,
   editChatMessage,
   deleteChatMessage,
@@ -49,6 +53,12 @@ function formatSecClock(sec) {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
+function isStandaloneEmoji(str) {
+  const s = String(str || '').trim();
+  if (!s || s.length > 14) return false;
+  return /^(?:\p{Extended_Pictographic}|\uFE0F|\u200D|\s){1,4}$/u.test(s);
+}
+
 /** Встроенный плеер для зашифрованных голосовых сообщений и аудиофайлов */
 function EncryptedAudioPlayer({ msg, previewUrl }) {
   const audioRef = useRef(null);
@@ -56,6 +66,7 @@ function EncryptedAudioPlayer({ msg, previewUrl }) {
   const [loading, setLoading] = useState(false);
   const [curSec, setCurSec] = useState(0);
   const [durSec, setDurSec] = useState(0);
+  const rate = Number(store.settings.voicePlaybackRate) || 1;
 
   useEffect(() => {
     const el = audioRef.current;
@@ -93,12 +104,21 @@ function EncryptedAudioPlayer({ msg, previewUrl }) {
     }
     const el = audioRef.current;
     if (!el) return;
+    if (el) el.playbackRate = rate;
     if (playing) {
       el.pause();
       setPlaying(false);
     } else {
       el.play().then(() => setPlaying(true)).catch(() => {});
     }
+  };
+
+  const cycleRate = (e) => {
+    e.stopPropagation();
+    const order = [1, 1.25, 1.5, 2];
+    const next = order[(order.indexOf(rate) + 1) % order.length] || 1;
+    if (audioRef.current) audioRef.current.playbackRate = next;
+    updateClientSettings({ voicePlaybackRate: next });
   };
 
   const pct = durSec > 0 ? Math.min(100, (curSec / durSec) * 100) : 0;
@@ -114,9 +134,12 @@ function EncryptedAudioPlayer({ msg, previewUrl }) {
       </div>
       <div class="voice-meta-line">
         <span>${loading ? 'Расшифровка AES-GCM…' : `${formatSecClock(curSec)}${durSec ? ` / ${formatSecClock(durSec)}` : ''}`}</span>
-        <span>${formatBytes(msg.media?.size || 0)} · E2EE</span>
+        <span>${formatBytes(msg.media?.size || 0, store.settings.byteUnits)} · E2EE</span>
       </div>
     </div>
+    <button type="button" class="voice-rate-pill" title="Скорость воспроизведения" onClick=${cycleRate}>
+      ${rate}×
+    </button>
   </div>`;
 }
 
@@ -128,6 +151,7 @@ export function ChatView() {
   const [draft, setDraft] = useState('');
   const [onceToggle, setOnceToggle] = useState(false);
   const [activeMsgActionsId, setActiveMsgActionsId] = useState(null);
+  const [unblurredMap, setUnblurredMap] = useState({});
 
   // Запись зашифрованного голосового сообщения
   const [recording, setRecording] = useState(false);
@@ -143,6 +167,10 @@ export function ChatView() {
   useEffect(() => {
     if (ui.editingMsg && ui.editingMsg.chatId === chat?.id) {
       setDraft(ui.editingMsg.text || '');
+      return;
+    }
+    if (chat?.id) {
+      setDraft(settings.autoSaveDrafts !== false ? (store.drafts?.[chat.id] || '') : '');
     }
   }, [ui.editingMsg?.id, chat?.id]);
 
@@ -199,6 +227,7 @@ export function ChatView() {
     if (!draft.trim()) return;
     const text = draft;
     setDraft('');
+    saveChatDraft(chat.id, '');
     if (ui.editingMsg && ui.editingMsg.chatId === chat.id) {
       await editChatMessage(chat.id, ui.editingMsg.id, text);
       return;
@@ -306,7 +335,7 @@ export function ChatView() {
     } else if (action === 'copy' && m.text) {
       copyMessageText(m.text);
     } else if (action === 'react' && (chat.kind === 'dm' || chat.kind === 'echo')) {
-      toggleMessageReaction(chat.id, m.id, '👍');
+      toggleMessageReaction(chat.id, m.id, settings.quickReactionEmoji || '👍');
     }
   };
 
@@ -495,7 +524,17 @@ export function ChatView() {
                   : isAudio
                     ? html`<${EncryptedAudioPlayer} msg=${m} previewUrl=${previewUrl} />`
                     : previewUrl && mediaObj.mime?.startsWith('image/')
-                      ? html`<img class="decrypted-img" src=${previewUrl} alt=${mediaObj.name} />`
+                      ? html`<img
+                          class=${`decrypted-img ${settings.blurMediaInChat && !unblurredMap[m.id] ? 'privacy-blurred' : ''}`}
+                          src=${previewUrl}
+                          alt=${mediaObj.name}
+                          onClick=${(e) => {
+                            if (settings.blurMediaInChat && !unblurredMap[m.id]) {
+                              e.stopPropagation();
+                              setUnblurredMap((prev) => ({ ...prev, [m.id]: true }));
+                            }
+                          }}
+                        />`
                       : html`<button type="button" class="file-dl-btn" onClick=${async () => {
                           if (mediaObj.mime?.startsWith('image/')) {
                             await openEncryptedMedia(m);
@@ -506,18 +545,20 @@ export function ChatView() {
                           <${Icon} name="lock" size=${16} />
                           <div>
                             <b>${mediaObj.name}</b>
-                            <span>${formatBytes(mediaObj.size)} · AES-256-GCM · нажмите для расшифровки</span>
+                            <span>${formatBytes(mediaObj.size, settings.byteUnits)} · AES-256-GCM · нажмите для расшифровки</span>
                           </div>
                         </button>`}
               </div>`}
 
-              ${m.text && html`<div class="msg-text"><${RichMessageText} text=${m.text} /></div>`}
+              ${m.text && html`<div class=${`msg-text ${settings.largeSingleEmoji !== false && !mediaObj && isStandaloneEmoji(m.text) ? 'msg-jumbo-emoji' : ''}`}>
+                <${RichMessageText} text=${m.text} />
+              </div>`}
 
               ${m.reactions && Object.keys(m.reactions).length > 0 && html`<div class="msg-reactions-row" onClick=${(e) => e.stopPropagation()}>
                 ${Object.entries(m.reactions).map(([emoji, users]) => html`<button
                   key=${emoji}
                   type="button"
-                  class=${`reaction-pill ${users.includes(me?.userId) ? 'mine' : ''}`}
+                  class=${`reaction-pill ${users.includes(me?.userId) ? 'mine' : ''} ${settings.animateReactions !== false ? 'anim' : ''}`}
                   onClick=${() => toggleMessageReaction(chat.id, m.id, emoji)}
                 ><span>${emoji}</span><b>${users.length}</b></button>`)}
               </div>`}
@@ -529,14 +570,20 @@ export function ChatView() {
               </div>`}
 
               ${!isSystemNotice && html`<div class="msg-hover-bar" onClick=${(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  title="Отметка 👍"
-                  onClick=${() => {
-                    toggleMessageReaction(chat.id, m.id, '👍');
-                    setActiveMsgActionsId(null);
-                  }}
-                >👍</button>
+                ${(() => {
+                  const pack = REACTION_PACKS[settings.reactionPack] || REACTION_PACKS.winter;
+                  const fav = settings.quickReactionEmoji || '❄️';
+                  const listEmojis = [fav, ...pack.emojis.filter((x) => x !== fav)].slice(0, 5);
+                  return listEmojis.map((em) => html`<button
+                    key=${em}
+                    type="button"
+                    title=${`Реакция ${em}`}
+                    onClick=${() => {
+                      toggleMessageReaction(chat.id, m.id, em);
+                      setActiveMsgActionsId(null);
+                    }}
+                  >${em}</button>`);
+                })()}
                 <button
                   type="button"
                   title="Цитировать сообщение"
@@ -619,6 +666,19 @@ export function ChatView() {
               </button>
             </div>`}
 
+            ${settings.composerEmojiBar && html`<div class="composer-emoji-strip">
+              ${COMPOSER_QUICK_EMOJIS.map((em) => html`<button
+                key=${em}
+                type="button"
+                class="composer-emoji-chip"
+                onClick=${() => {
+                  const next = draft + em;
+                  setDraft(next);
+                  saveChatDraft(chat.id, next);
+                }}
+              >${em}</button>`)}
+            </div>`}
+
             <div class="composer-bar">
               <input
                 ref=${fileInputRef}
@@ -645,6 +705,8 @@ export function ChatView() {
                 class="composer-input"
                 rows="1"
                 spellcheck=${settings.spellcheck !== false}
+                autoComplete=${settings.incognitoKeyboard ? 'off' : 'on'}
+                autoCorrect=${settings.incognitoKeyboard ? 'off' : 'on'}
                 placeholder=${chat.kind === 'echo'
                   ? 'Текст для эхо-проверки E2EE…'
                   : settings.enterToSend === false
@@ -652,8 +714,10 @@ export function ChatView() {
                     : 'Сообщение (E2EE)…'}
                 value=${draft}
                 onInput=${(e) => {
-                  setDraft(e.target.value);
-                  if (e.target.value.trim()) notifyTypingInChat(chat.id);
+                  const v = e.target.value;
+                  setDraft(v);
+                  if (!ui.editingMsg) saveChatDraft(chat.id, v);
+                  if (v.trim()) notifyTypingInChat(chat.id);
                 }}
                 onKeyDown=${onComposerKeyDown}
               ></textarea>

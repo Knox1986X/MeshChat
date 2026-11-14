@@ -9,6 +9,8 @@ import {
   syncNow,
   notifyStore,
   setNavTab,
+  openSettingsSection,
+  uiText,
   uninstallLegacyApk,
   applyAppUpdate,
   dismissUpdateBanner,
@@ -30,6 +32,7 @@ export function Sidebar() {
     profile,
     chats,
     messages,
+    drafts,
     typingByChat,
     ui,
     settings,
@@ -44,13 +47,21 @@ export function Sidebar() {
     android,
   } = store;
 
-  const unreadChatsCount = Object.values(chats).filter((c) => (c.unread || 0) > 0).length;
+  const allChatItems = Object.values(chats);
+  const unreadChatsCount = allChatItems.filter((c) => (c.unread || 0) > 0).length;
+  const enabledSys = Array.isArray(settings.enabledSystemFolders)
+    ? settings.enabledSystemFolders
+    : ['unread', 'dm', 'verified', 'pinned', 'ask'];
+  const customFolders = Array.isArray(settings.customFolders) ? settings.customFolders : [];
+  const activeCustomFolder = customFolders.find((f) => f.id === ui.spaceFilter);
 
-  const filteredChats = Object.values(chats)
+  const filteredChats = allChatItems
     .filter((c) => {
+      if (activeCustomFolder) return (activeCustomFolder.chatIds || []).includes(c.id);
       if (ui.spaceFilter === 'unread') return (c.unread || 0) > 0;
       if (ui.spaceFilter === 'dm') return c.kind === 'dm';
       if (ui.spaceFilter === 'verified') return Boolean(c.verified) || c.kind === 'echo';
+      if (ui.spaceFilter === 'pinned') return Boolean(c.pinned);
       if (ui.spaceFilter === 'ask') return c.kind === 'ask';
       return true;
     })
@@ -91,14 +102,17 @@ export function Sidebar() {
     const list = messages[c.id] || [];
     const last = list[list.length - 1];
 
+    const savedDraft = settings.autoSaveDrafts !== false ? (drafts?.[c.id] || '') : '';
     const checkPrefix = last?.out
       ? (last.status === 'read' || last.status === 'delivered' ? '✓✓ ' : '✓ ')
       : '';
     const previewBody = isTyping
       ? 'печатает…'
-      : last
-        ? `${checkPrefix}${last.text || (last.media?.mime?.startsWith('audio/') ? '[Голосовое E2EE]' : '[Зашифрованный файл]')}`
-        : (c.lastPreview || 'Зашифрованный канал Double Ratchet');
+      : savedDraft
+        ? `Черновик: ${savedDraft}`
+        : last
+          ? `${checkPrefix}${last.text || (last.media?.mime?.startsWith('audio/') ? '[Голосовое E2EE]' : '[Зашифрованный файл]')}`
+          : (c.lastPreview || 'Зашифрованный канал Double Ratchet');
 
     return html`<div
       key=${c.id}
@@ -112,7 +126,7 @@ export function Sidebar() {
         color=${c.avatarColor || '#3B4CCA'}
         kind=${c.kind}
         size=${48}
-        online=${c.kind === 'echo' || (isOnline && c.kind === 'dm')}
+        online=${!settings.hideOnlinePresence && (c.kind === 'echo' || (isOnline && c.kind === 'dm'))}
       />
 
       <div class="chat-item-body">
@@ -142,7 +156,7 @@ export function Sidebar() {
   return html`<aside class=${`sidebar ${ui.activeChatId ? 'mobile-hidden' : ''}`}>
     <div class="chats-hero-header">
       <div class="chats-hero-left">
-        <h1 class="screen-big-title">Чаты</h1>
+        <h1 class="screen-big-title">${uiText('chats')}</h1>
         <div class="screen-pills-row">
           <button
             type="button"
@@ -226,19 +240,47 @@ export function Sidebar() {
       />
     </div>
 
-    <div class="filter-pills-scroll">
-      ${[
-        ['all', 'Все'],
-        ['unread', unreadChatsCount > 0 ? `Непрочитанные · ${unreadChatsCount}` : 'Непрочитанные'],
-        ['dm', 'Личные'],
-        ['verified', 'Проверенные'],
-        ['ask', 'Шлюз'],
-      ].map(([id, label]) => html`<button
-        key=${id}
+    <div class=${`filter-pills-scroll ${settings.compactFolderTabs ? 'compact' : ''}`}>
+      <button
         type="button"
-        class=${`filter-pill ${ui.spaceFilter === id ? 'active' : ''}`}
-        onClick=${() => { store.ui.spaceFilter = id; notifyStore(); }}
-      >${label}</button>`)}
+        class=${`filter-pill ${ui.spaceFilter === 'all' ? 'active' : ''}`}
+        onClick=${() => { store.ui.spaceFilter = 'all'; notifyStore(); }}
+      >Все</button>
+
+      ${[
+        ['unread', 'Непрочитанные', unreadChatsCount],
+        ['dm', 'Личные', allChatItems.filter((c) => c.kind === 'dm' && (c.unread || 0) > 0).length],
+        ['verified', 'Проверенные', allChatItems.filter((c) => (c.verified || c.kind === 'echo') && (c.unread || 0) > 0).length],
+        ['pinned', 'Закреплённые', allChatItems.filter((c) => c.pinned && (c.unread || 0) > 0).length],
+        ['ask', 'Шлюз', allChatItems.filter((c) => c.kind === 'ask' && (c.unread || 0) > 0).length],
+      ]
+        .filter(([id]) => enabledSys.includes(id))
+        .map(([id, label, cnt]) => html`<button
+          key=${id}
+          type="button"
+          class=${`filter-pill ${ui.spaceFilter === id ? 'active' : ''}`}
+          onClick=${() => { store.ui.spaceFilter = id; notifyStore(); }}
+        >${settings.showFolderCounts !== false && cnt > 0 ? `${label} · ${cnt}` : label}</button>`)}
+
+      ${customFolders.map((fld) => {
+        const cnt = allChatItems.filter((c) => (fld.chatIds || []).includes(c.id) && (c.unread || 0) > 0).length;
+        return html`<button
+          key=${fld.id}
+          type="button"
+          class=${`filter-pill custom-folder-pill ${ui.spaceFilter === fld.id ? 'active' : ''}`}
+          onClick=${() => { store.ui.spaceFilter = fld.id; notifyStore(); }}
+        >
+          <${Icon} name="folder" size=${12} />
+          <span>${settings.showFolderCounts !== false && cnt > 0 ? `${fld.title} · ${cnt}` : fld.title}</span>
+        </button>`;
+      })}
+
+      <button
+        type="button"
+        class="filter-pill folder-cfg-pill"
+        title="Настроить папки с чатами"
+        onClick=${() => { openSettingsSection('folders'); setNavTab('settings'); }}
+      ><${Icon} name="folder" size=${13} /></button>
     </div>
 
     <div class="chat-list">

@@ -199,12 +199,41 @@ test('E2eeCallManager проводит полный цикл зашифрова�
   }
 });
 
-test('Версия v1.8.0 (build 9), новогодние сцены, градиенты и действия чата', async () => {
-  assert.equal(storeMod.APP_VERSION, '1.8.0');
-  assert.equal(storeMod.APP_VERSION_CODE, 9);
+test('Версия v1.9.0 (build 10), 11 разделов настроек, папки чатов, энергосбережение и действия чата', async () => {
+  assert.equal(storeMod.APP_VERSION, '1.9.0');
+  assert.equal(storeMod.APP_VERSION_CODE, 10);
   assert.equal(Object.keys(storeMod.THEME_PRESETS).length, 18);
   assert.equal(storeMod.HOLIDAY_MOOD_PACKS.length, 6);
   assert.ok(Object.keys(storeMod.BUBBLE_GRADIENTS).length >= 8);
+
+  const secMod = await import('../public/js/ui/settings-sections.mjs');
+  assert.equal(secMod.SETTINGS_SECTIONS_META.length, 11);
+  assert.ok(secMod.SETTINGS_SEARCH_INDEX.length >= 15);
+
+  // Проверяем вход в подраздел настроек и выход кнопкой «Назад» Android
+  storeMod.store.me = { userId: 'u_sec', username: 'knox' };
+  storeMod.store.ui.navTab = 'settings';
+  storeMod.openSettingsSection('folders');
+  assert.equal(storeMod.store.ui.settingsSection, 'folders');
+  assert.equal(storeMod.handleBackNavigation(), true);
+  assert.equal(storeMod.store.ui.settingsSection, null);
+  assert.equal(storeMod.store.ui.navTab, 'settings');
+
+  // Проверяем создание, наполнение и удаление пользовательской папки чатов
+  const folder = await storeMod.createCustomChatFolder('Работа', ['echo:loopback']);
+  assert.ok(folder && folder.id.startsWith('fld_'));
+  assert.equal(storeMod.store.settings.customFolders.length, 1);
+  await storeMod.toggleChatInFolder(folder.id, 'dm:peer2');
+  assert.deepEqual(storeMod.store.settings.customFolders[0].chatIds, ['echo:loopback', 'dm:peer2']);
+  await storeMod.deleteCustomChatFolder(folder.id);
+  assert.equal(storeMod.store.settings.customFolders.length, 0);
+
+  // Проверяем режим энергосбережения и переключение языка
+  await storeMod.updateClientSettings({ powerSaveMode: 'always', appLanguage: 'en' });
+  assert.equal(storeMod.isPowerSavingActive(), true);
+  assert.equal(storeMod.uiText('settings'), 'Settings');
+  await storeMod.updateClientSettings({ powerSaveMode: 'auto20', appLanguage: 'ru' });
+  assert.equal(storeMod.uiText('settings'), 'Настройки');
 
   await storeMod.applyHolidayMoodPack('pine_and_gold');
   assert.equal(storeMod.store.theme.preset, 'ny_pine_gold');
@@ -255,7 +284,7 @@ test('Версия v1.8.0 (build 9), новогодние сцены, гради
 test('Service Worker, атмосферный слой и Android MainActivity содержат полную реализацию', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const sw = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8');
-  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v9'"));
+  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v10'"));
   assert.ok(sw.includes("url.pathname.startsWith('/api/')"));
 
   const atmo = fs.readFileSync(path.join(root, 'public/js/ui/atmosphere-layer.mjs'), 'utf8');
@@ -270,6 +299,6 @@ test('Service Worker, атмосферный слой и Android MainActivity с
 
   const manifest = fs.readFileSync(path.join(root, 'android/AndroidManifest.xml'), 'utf8');
   assert.ok(manifest.includes('package="io.meshchat.app"'));
-  assert.ok(manifest.includes('android:versionCode="9"'));
-  assert.ok(manifest.includes('android:versionName="1.8.0"'));
+  assert.ok(manifest.includes('android:versionCode="10"'));
+  assert.ok(manifest.includes('android:versionName="1.9.0"'));
 });

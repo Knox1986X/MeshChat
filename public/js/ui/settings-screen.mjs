@@ -1,6 +1,9 @@
-// Полнофункциональный центр настроек MeshChat v1.6 (Оформление, Чаты, Приватность и PIN,
-// Криптография и Сеть, Звук и Виброотклик, Память и Зашифрованный резерв AES-256-GCM)
-// + экран локальной PIN-блокировки PinLockOverlay.
+// Многораздельный центр «Настройки» MeshChat v1.9:
+//   - Главный хаб из 11 отдельных карточек-категорий с пастельными иконками, верхней панелью
+//     (QR-визитка · Настройки · Поиск · Меню ⋮) и мгновенным глобальным поиском.
+//   - Полноэкранный переход внутрь выбранного раздела на мобильных устройствах (с поддержкой
+//     системной кнопки «Назад» Android) и двухпанельный режим Master-Detail на широких экранах ПК.
+//   - Экран локальной PIN-блокировки PinLockOverlay и студия тем ThemeStudioCard.
 
 import { html, useState, useRef, useEffect } from '../../vendor/preact.mjs';
 import {
@@ -12,6 +15,9 @@ import {
   THEME_PRESETS,
   BUBBLE_GRADIENTS,
   HOLIDAY_MOOD_PACKS,
+  uiText,
+  openSettingsSection,
+  closeSettingsSection,
   updateThemeSettings,
   applyHolidayMoodPack,
   resetThemeSettings,
@@ -21,7 +27,6 @@ import {
   toggleAndroidLanMesh,
   rotateBlindMailbox,
   checkForUpdates,
-  applyAppUpdate,
   logoutAndWipeDevice,
   setAppPin,
   disableAppPin,
@@ -41,16 +46,17 @@ import {
 } from '../store/app-store.mjs';
 import { TRANSPORT_POLICY } from '../transport/transport-interface.mjs';
 import { Icon, playSfx, formatBytes, formatTime } from './boss-screen.mjs';
-
-const SETTINGS_CATEGORIES = [
-  { id: 'all', label: 'Все', icon: 'sliders' },
-  { id: 'appearance', label: 'Оформление', icon: 'palette' },
-  { id: 'chats', label: 'Чаты и ввод', icon: 'chat' },
-  { id: 'privacy', label: 'Приватность и PIN', icon: 'lock' },
-  { id: 'network', label: 'Крипто и сеть', icon: 'radar' },
-  { id: 'sound', label: 'Звук и отклик', icon: 'volume' },
-  { id: 'storage', label: 'Память и бэкап', icon: 'database' },
-];
+import {
+  SETTINGS_SECTIONS_META,
+  SETTINGS_SEARCH_INDEX,
+  getSectionTitle,
+  AccountSectionView,
+  ReactionsSectionView,
+  FoldersSectionView,
+  PowerSavingSectionView,
+  LanguageSectionView,
+  UpdatesDiagnosticsSectionView,
+} from './settings-sections.mjs';
 
 const POLICY_LIST = [
   [TRANSPORT_POLICY.AUTO, 'Автоматический мультитранспорт', 'WSS -> P2P WebRTC -> Tor -> I2P'],
@@ -149,14 +155,14 @@ export function PinLockOverlay() {
   </div>`;
 }
 
-// ─────────────────────── Студия кастомных тем, шрифтов и плотности ───────────────────────
+// ─────────────────────── Студия кастомных тем, градиентов, снежинок и шрифта ───────────────────────
 
 export function ThemeStudioCard({ onClose = null }) {
   const { theme, settings } = store;
 
   return html`<div class="studio-card">
     <div class="studio-card-head">
-      <h3><${Icon} name="palette" size=${16} /> Кастомизация темы, цветов и типографики</h3>
+      <h3><${Icon} name="palette" size=${16} /> Темы, градиенты, снежинки и типографика</h3>
       <div class="studio-head-btns">
         <button type="button" class="btn-ghost compact" onClick=${resetThemeSettings}>
           Сбросить тему
@@ -167,7 +173,6 @@ export function ThemeStudioCard({ onClose = null }) {
       </div>
     </div>
 
-    <!-- Живое превью пузырей сообщений и шрифта -->
     <div class="theme-live-preview">
       <div class="preview-bubble-in">
         <span class="preview-meta">Собеседник · ${formatTime(Date.now() - 120000, settings.timeFormat)}</span>
@@ -426,47 +431,123 @@ export function ThemeStudioCard({ onClose = null }) {
   </div>`;
 }
 
-// ─────────────────────── Главный экран «Настройки» ───────────────────────
+// ─────────────────────── 2. Подраздел «Настройки чатов» ───────────────────────
 
-export function SettingsScreen() {
-  const { settings, update, android, ui, me } = store;
-  const activeCat = ui.settingsCategory || 'all';
+function ChatsSectionView() {
+  const { settings } = store;
 
-  const [search, setSearch] = useState('');
-  const [serverUrl, setServerUrl] = useState(settings.serverUrl || '');
-  const [onionUrl, setOnionUrl] = useState(settings.onionUrl || '');
-  const [i2pUrl, setI2pUrl] = useState(settings.i2pUrl || '');
-  const [localBridgeUrl, setLocalBridgeUrl] = useState(settings.localBridgeUrl || 'ws://127.0.0.1:27700');
-  const [customStunUrl, setCustomStunUrl] = useState(settings.customStunUrl || 'stun:stun.l.google.com:19302');
-  const [bossDocTitle, setBossDocTitle] = useState(settings.bossDocTitle || 'Финансовая_модель_Q4_консолидация.xlsx');
+  return html`<div class="settings-sub-stack">
+    <${ThemeStudioCard} />
 
-  // Управление локальным PIN-кодом
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="chat" size=${16} /> Поведение диалогов, клавиатуры и аудио</h3>
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ enterToSend: settings.enterToSend === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Отправка клавишей Enter</div>
+            <div class="plugin-sub">
+              ${settings.enterToSend !== false
+                ? 'Enter отправляет сообщение, Shift+Enter переносит строку'
+                : 'Enter переносит строку, Ctrl+Enter отправляет сообщение'}
+            </div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.enterToSend !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ autoSaveDrafts: settings.autoSaveDrafts === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Автосохранение черновиков по каждому чату</div>
+            <div class="plugin-sub">Сохраняет недописанный текст локально в зашифрованном хранилище при смене чата</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.autoSaveDrafts !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ spellcheck: settings.spellcheck === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Проверка орфографии в поле ввода</div>
+            <div class="plugin-sub">Локальная подсветка опечаток системным словарём устройства</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.spellcheck !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ showChatAvatars: settings.showChatAvatars === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Аватары собеседников внутри ленты чата</div>
+            <div class="plugin-sub">Скройте для увеличения полезной ширины текста на узких экранах</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.showChatAvatars !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ confirmCall: !settings.confirmCall })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Подтверждение перед голосовым P2P-звонком</div>
+            <div class="plugin-sub">Защита от случайного нажатия на кнопку вызова в заголовке диалога</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.confirmCall ? 'on' : ''}`}><span></span></button>
+        </div>
+      </div>
+
+      <label class="field-label">Скорость воспроизведения голосовых сообщений по умолчанию</label>
+      <div class="chip-grid">
+        ${[
+          [1, '1.0× Обычная'],
+          [1.25, '1.25× Бодрая'],
+          [1.5, '1.5× Быстрая'],
+          [2, '2.0× Ускоренная'],
+        ].map(([rate, lbl]) => html`<button
+          key=${rate}
+          type="button"
+          class=${`choice-chip ${Number(settings.voicePlaybackRate || 1) === rate ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ voicePlaybackRate: rate })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Высота превью сообщений в списке чатов</label>
+      <div class="chip-grid">
+        ${[
+          [1, '1 строка (компактно)'],
+          [2, '2 строки (стандарт)'],
+          [3, '3 строки (подробно)'],
+        ].map(([lines, lbl]) => html`<button
+          key=${lines}
+          type="button"
+          class=${`choice-chip ${Number(settings.chatListLines || 2) === lines ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ chatListLines: lines })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Таймер автоудаления по умолчанию для новых диалогов (TTL)</label>
+      <div class="chip-grid">
+        ${[
+          [0, 'Бессрочно'],
+          [30, '30 сек'],
+          [300, '5 мин'],
+          [3600, '1 час'],
+          [86400, '24 часа'],
+          [604800, '7 дней'],
+        ].map(([sec, lbl]) => html`<button
+          key=${sec}
+          type="button"
+          class=${`choice-chip ${Number(settings.defaultTtlSec || 0) === sec ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ defaultTtlSec: sec })}
+        >${lbl}</button>`)}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── 4. Подраздел «Конфиденциальность» ───────────────────────
+
+function PrivacySectionView() {
+  const { settings, android, me } = store;
   const [pinDraft, setPinDraft] = useState('');
   const [pinCurrent, setPinCurrent] = useState('');
-
-  // Зашифрованный резервный архив
-  const [backupPass, setBackupPass] = useState('');
-  const [wipeConfirm, setWipeConfirm] = useState(false);
-  const backupFileRef = useRef(null);
-
-  const q = search.trim().toLowerCase();
-  const showSection = (catId, keywords) => {
-    if (q) return keywords.toLowerCase().includes(q);
-    return activeCat === 'all' || activeCat === catId;
-  };
-
-  const stats = getStorageStats();
-
-  const onSaveNetwork = async () => {
-    await updateClientSettings({
-      serverUrl: serverUrl.trim(),
-      onionUrl: onionUrl.trim(),
-      i2pUrl: i2pUrl.trim(),
-      localBridgeUrl: localBridgeUrl.trim() || 'ws://127.0.0.1:27700',
-      customStunUrl: customStunUrl.trim(),
-    });
-    showToast('Сетевая и транспортная конфигурация применена');
-  };
+  const [bossDocTitle, setBossDocTitle] = useState(
+    settings.bossDocTitle || 'Финансовая_модель_Q4_консолидация.xlsx'
+  );
 
   const onEnablePin = async () => {
     try {
@@ -485,6 +566,374 @@ export function SettingsScreen() {
       showToast(err.message, 'err');
     }
   };
+
+  return html`<div class="settings-sub-stack">
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="lock" size=${16} /> PIN-блокировка и защита локального доступа</h3>
+      </div>
+
+      <div class="pin-config-box">
+        <div class="plugin-copy">
+          <div class="plugin-title">
+            Локальный PIN-код входа (${settings.pinHashB64 ? 'Активен · SHA-256 с солью' : 'Выключен'})
+          </div>
+          <div class="plugin-sub">
+            Защищает открытую сессию при передаче телефона в чужие руки или после таймера неактивности
+          </div>
+        </div>
+
+        ${!settings.pinHashB64
+          ? html`<div class="inline-form-row">
+              <input
+                class="field-input"
+                type="password"
+                inputmode="numeric"
+                maxLength="8"
+                placeholder="Новый PIN (4–8 цифр)"
+                value=${pinDraft}
+                onInput=${(e) => setPinDraft(e.target.value.replace(/\D/g, ''))}
+              />
+              <button type="button" class="btn-primary compact" onClick=${onEnablePin}>
+                Установить PIN
+              </button>
+            </div>`
+          : html`<div class="inline-form-row">
+              <input
+                class="field-input"
+                type="password"
+                inputmode="numeric"
+                maxLength="8"
+                placeholder="Текущий PIN для отключения"
+                value=${pinCurrent}
+                onInput=${(e) => setPinCurrent(e.target.value.replace(/\D/g, ''))}
+              />
+              <button type="button" class="btn-ghost compact" onClick=${lockAppNow}>
+                Заблокировать
+              </button>
+              <button type="button" class="btn-danger compact" onClick=${onDisablePin}>
+                Отключить PIN
+              </button>
+            </div>`}
+      </div>
+
+      <label class="field-label">Автоблокировка при отсутствии активности</label>
+      <div class="chip-grid">
+        ${[
+          [0, 'Выключена'],
+          [1, '1 мин'],
+          [5, '5 мин'],
+          [15, '15 мин'],
+          [30, '30 мин'],
+        ].map(([m, lbl]) => html`<button
+          key=${m}
+          type="button"
+          class=${`choice-chip ${Number(settings.autoLockMinutes || 0) === m ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ autoLockMinutes: m })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Автоочистка буфера обмена после копирования ключей и текста</label>
+      <div class="chip-grid">
+        ${[
+          [0, 'Не очищать'],
+          [15, 'Через 15 сек'],
+          [30, 'Через 30 сек'],
+          [60, 'Через 60 сек'],
+        ].map(([sec, lbl]) => html`<button
+          key=${sec}
+          type="button"
+          class=${`choice-chip ${Number(settings.clipboardAutoClearSec || 0) === sec ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ clipboardAutoClearSec: sec })}
+        >${lbl}</button>`)}
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ lockOnBackground: !settings.lockOnBackground })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Мгновенная блокировка при сворачивании приложения</div>
+            <div class="plugin-sub">Автоматически включает PIN-экран при переключении в другое приложение</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.lockOnBackground ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${toggleScreenshotProtection}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Защита от скриншотов и записи экрана (FLAG_SECURE)</div>
+            <div class="plugin-sub">
+              ${android.screenshotProtection
+                ? 'Снимки экрана и превью в меню недавних приложений заблокированы ОС Android'
+                : 'По умолчанию выключено — вы можете свободно делать скриншоты'}
+            </div>
+          </div>
+          <button type="button" class=${`ios-switch ${android.screenshotProtection ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ incognitoKeyboard: !settings.incognitoKeyboard })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Приватный режим экранной клавиатуры</div>
+            <div class="plugin-sub">Отключает автозаполнение и запоминание вводимых слов клавиатурой ОС</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.incognitoKeyboard ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ blurMediaInChat: !settings.blurMediaInChat })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Размывать фотографии в чате до нажатия</div>
+            <div class="plugin-sub">Защищает изображения на экране в транспорте и общественных местах</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.blurMediaInChat ? 'on' : ''}`}><span></span></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="eyeOff" size=${16} /> Видимость активности и режим маскировки (Esc×2)</h3>
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ hideOnlinePresence: !settings.hideOnlinePresence })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Скрывать зелёный индикатор присутствия «онлайн»</div>
+            <div class="plugin-sub">Отключает световую точку присутствия на аватарах</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.hideOnlinePresence ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendReadReceipts: settings.sendReadReceipts === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Отправлять отчёты о прочтении (✓✓ Прочитано)</div>
+            <div class="plugin-sub">Уведомляет собеседника по E2EE о прочтении его сообщений</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.sendReadReceipts !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendTypingIndicators: settings.sendTypingIndicators === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Индикатор набора текста («печатает…»)</div>
+            <div class="plugin-sub">Отправляет зашифрованный сигнал набора текста в открытый диалог</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.sendTypingIndicators !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ shareProfileE2ee: settings.shareProfileE2ee === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Передавать кастомный профиль собеседникам (E2EE)</div>
+            <div class="plugin-sub">Если выключено, контакты видят только ваш @username без аватара и био</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.shareProfileE2ee !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ previewInList: settings.previewInList === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Показывать текст последних сообщений в списке чатов</div>
+            <div class="plugin-sub">Отключите, чтобы скрыть реплики на главном экране от посторонних глаз</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.previewInList !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ acceptAnonGateway: settings.acceptAnonGateway === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Принимать сообщения через внешний E2E-шлюз (/q/${me?.username})</div>
+            <div class="plugin-sub">Позволяет отправлять вам зашифрованные обращения через браузер</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.acceptAnonGateway !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ strictBossWipe: !settings.strictBossWipe })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Экстренная выгрузка ключей сессий из ОЗУ при блокировке</div>
+            <div class="plugin-sub">Очищает кеш расшифрованных ключей в CryptoWorker при двойном Esc</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.strictBossWipe ? 'on' : ''}`}><span></span></button>
+        </div>
+      </div>
+
+      <label class="field-label">Шаблон экрана мгновенной маскировки (Esc×2)</label>
+      <div class="chip-grid">
+        ${[
+          ['xlsx', 'Таблица бюджета XLSX'],
+          ['terminal', 'Терминал сборки Linux'],
+          ['notes', 'Инженерные заметки'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.bossTemplate || 'xlsx') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ bossTemplate: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      <div class="inline-form-row">
+        <input
+          class="field-input"
+          type="text"
+          value=${bossDocTitle}
+          onInput=${(e) => setBossDocTitle(e.target.value)}
+          onBlur=${() => updateClientSettings({ bossDocTitle: bossDocTitle.trim() || 'Отчёт_Q4.xlsx' })}
+        />
+        <button type="button" class="btn-ghost compact" onClick=${() => toggleBossMode(true)}>
+          <${Icon} name="eyeOff" size=${14} /> Проверить
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── 5. Подраздел «Уведомления и звуки» ───────────────────────
+
+function NotificationsSectionView() {
+  const { settings } = store;
+
+  return html`<div class="settings-sub-stack">
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="volume" size=${16} /> Уведомления, звуки, звонки и счётчик</h3>
+      </div>
+
+      <label class="field-label">Содержимое системных фоновых уведомлений ОС</label>
+      <div class="chip-grid">
+        ${[
+          ['full', 'Имя и текст'],
+          ['sender', 'Только имя'],
+          ['stealth', 'Скрытно (без имён)'],
+          ['off', 'Выключены'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.notificationContent || 'sender') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ notificationContent: id })}
+        >${lbl}</button>`)}
+        <button type="button" class="btn-ghost compact" onClick=${requestSystemNotificationAccess}>
+          Разрешить в ОС
+        </button>
+      </div>
+
+      <label class="field-label">Счётчик непрочитанных на нижней вкладке «Чаты»</label>
+      <div class="chip-grid">
+        ${[
+          ['unmuted', 'Только активные чаты'],
+          ['all', 'Все чаты (включая без звука)'],
+          ['off', 'Скрывать счётчик'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.unreadCounterMode || 'unmuted') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ unreadCounterMode: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ sound: settings.sound === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Звук входящих сообщений</div>
+            <div class="plugin-sub">Чистый синтез WebAudio API локально без внешних медиафайлов</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.sound !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ outgoingSound: settings.outgoingSound === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Звуковой сигнал при отправке сообщения</div>
+            <div class="plugin-sub">Короткий акустический импульс при упаковке конверта</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.outgoingSound !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ inAppBannerToast: settings.inAppBannerToast === false })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Всплывающие уведомления внутри приложения</div>
+            <div class="plugin-sub">Показывает баннер сверху, когда приходит сообщение в соседний чат</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.inAppBannerToast !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ quietHoursEnabled: !settings.quietHoursEnabled })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Режим «Тихие часы» (Не беспокоить ночью)</div>
+            <div class="plugin-sub">Автоматически отключает звук и вибрацию в заданный ночной интервал</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.quietHoursEnabled ? 'on' : ''}`}><span></span></button>
+        </div>
+      </div>
+
+      ${settings.quietHoursEnabled && html`<div>
+        <label class="field-label">Расписание тихих часов</label>
+        <div class="chip-grid">
+          ${[
+            ['23-07', '23:00 – 07:00'],
+            ['22-08', '22:00 – 08:00'],
+            ['00-08', '00:00 – 08:00'],
+          ].map(([id, lbl]) => html`<button
+            key=${id}
+            type="button"
+            class=${`choice-chip ${(settings.quietHoursRange || '23-07') === id ? 'active' : ''}`}
+            onClick=${() => updateClientSettings({ quietHoursRange: id })}
+          >${lbl}</button>`)}
+        </div>
+      </div>`}
+
+      <label class="field-label">Звуковой профиль входящих сообщений</label>
+      <div class="chip-grid">
+        ${[
+          ['crystal', 'Кристалл'],
+          ['chime', 'Новогодний перезвон'],
+          ['pulse', 'Импульс'],
+          ['sonar', 'Сонар'],
+          ['soft', 'Мягкий тон'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.soundProfile || 'crystal') === id ? 'active' : ''}`}
+          onClick=${() => {
+            updateClientSettings({ soundProfile: id });
+            playSfx('incoming', id);
+          }}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Мелодия входящего голосового P2P-вызова</label>
+      <div class="chip-grid">
+        ${[
+          ['northern', 'Северный аккорд'],
+          ['classic', 'Классический дуэт'],
+          ['pulse', 'Цифровой импульс'],
+          ['silent', 'Только вибрация'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.callRingtone || 'northern') === id ? 'active' : ''}`}
+          onClick=${() => {
+            updateClientSettings({ callRingtone: id });
+            playSfx('ring', id);
+          }}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Тактильная вибрация (Android Vibrator / Haptics)</label>
+      <div class="chip-grid">
+        ${[
+          ['off', 'Выключена'],
+          ['soft', 'Мягкий отклик'],
+          ['strong', 'Чёткий импульс'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.haptics || 'soft') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ haptics: id })}
+        >${lbl}</button>`)}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── 6. Подраздел «Данные и память» ───────────────────────
+
+function StorageSectionView() {
+  const { settings } = store;
+  const [backupPass, setBackupPass] = useState('');
+  const backupFileRef = useRef(null);
+  const stats = getStorageStats();
 
   const onExportVault = async () => {
     try {
@@ -506,748 +955,585 @@ export function SettingsScreen() {
     }
   };
 
-  return html`<section class="tab-screen settings-screen">
-    <header class="screen-hero-head">
-      <div>
-        <h1 class="screen-big-title">Настройки</h1>
-        <div class="screen-pills-row">
-          <span class="hero-status-pill online">v${APP_VERSION} · build ${APP_VERSION_CODE}</span>
-          <span class="hero-status-pill neutral">@${me?.username || 'local'}</span>
-          ${settings.pinHashB64 && html`<span class="hero-status-pill neutral">PIN активен</span>`}
+  return html`<div class="settings-sub-stack">
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="pie" size=${16} /> Использование локальной памяти и медиафайлы</h3>
+      </div>
+
+      <div class="storage-stats-grid">
+        <div class="stat-mini-box">
+          <b>${stats.dmCount}</b>
+          <span>Контактов</span>
+        </div>
+        <div class="stat-mini-box">
+          <b>${stats.msgCount}</b>
+          <span>Сообщений</span>
+        </div>
+        <div class="stat-mini-box">
+          <b>${stats.mediaCached}</b>
+          <span>Медиа в ОЗУ</span>
+        </div>
+        <div class="stat-mini-box">
+          <b>${formatBytes(stats.approxBytes, settings.byteUnits)}</b>
+          <span>База E2EE</span>
         </div>
       </div>
-      <div class="hero-quick-actions">
-        <button type="button" class="btn-ghost compact" title="Мгновенная блокировка" onClick=${lockAppNow}>
-          <${Icon} name="lock" size=${14} /> Блок
+
+      <label class="field-label">Автоматическая расшифровка входящих E2E-фотографий</label>
+      <div class="chip-grid">
+        ${[
+          ['always', 'Всегда сразу'],
+          ['1mb', 'До 1 МБ'],
+          ['manual', 'Только по нажатию'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.autoDecryptMedia || 'always') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ autoDecryptMedia: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Автоочистка расшифрованных медиа из оперативной памяти</label>
+      <div class="chip-grid">
+        ${[
+          [0, 'Вручную'],
+          [5, 'Через 5 мин простоя'],
+          [15, 'Через 15 мин простоя'],
+          [-1, 'При сворачивании окна'],
+        ].map(([val, lbl]) => html`<button
+          key=${val}
+          type="button"
+          class=${`choice-chip ${Number(settings.autoPurgeCacheMinutes || 0) === val ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ autoPurgeCacheMinutes: val })}
+        >${lbl}</button>`)}
+      </div>
+
+      <div class="studio-actions" style="justify-content:flex-start">
+        <button type="button" class="btn-ghost compact" onClick=${clearDecryptedMediaCache}>
+          Освободить медиа из ОЗУ сейчас
+        </button>
+        <button type="button" class="btn-ghost compact" onClick=${clearAllMessagesHistory}>
+          <${Icon} name="trash" size=${13} /> Очистить историю всех чатов
         </button>
       </div>
-    </header>
+    </div>
 
-    <div class="mesh-scroll-body">
-      <!-- Поиск по всем настройкам + переключатель разделов -->
-      <div class="settings-toolbar-box">
-        <div class="search-box settings-search-box">
-          <${Icon} name="search" size=${15} />
-          <input
-            type="text"
-            placeholder="Поиск настройки: тема, шрифт, PIN, TTL, паддинг, WebRTC, звук, бэкап…"
-            value=${search}
-            onInput=${(e) => setSearch(e.target.value)}
-          />
-          ${search && html`<button type="button" class="icon-btn small" onClick=${() => setSearch('')}>
-            <${Icon} name="close" size=${13} />
-          </button>`}
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="database" size=${16} /> Зашифрованная резервная копия (AES-256-GCM)</h3>
+      </div>
+
+      <p class="modal-desc">
+        Экспортирует историю диалогов, контакты, папки и тему оформления в зашифрованный контейнер
+        <code>PBKDF2-SHA256 (210 000 итераций) + AES-256-GCM</code>.
+      </p>
+
+      <input
+        class="field-input"
+        type="password"
+        placeholder="Парольная фраза шифрования архива (минимум 6 символов)"
+        value=${backupPass}
+        onInput=${(e) => setBackupPass(e.target.value)}
+      />
+      <input
+        ref=${backupFileRef}
+        type="file"
+        accept=".json,application/json"
+        hidden
+        onChange=${onImportVaultFile}
+      />
+      <div class="studio-actions" style="justify-content:flex-start">
+        <button type="button" class="btn-primary compact" onClick=${onExportVault}>
+          <${Icon} name="download" size=${14} /> Экспорт .enc.json
+        </button>
+        <button type="button" class="btn-ghost compact" onClick=${() => backupFileRef.current?.click()}>
+          <${Icon} name="upload" size=${14} /> Импорт .enc.json
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── 8. Подраздел «Устройства и сеть» ───────────────────────
+
+function DevicesNetworkSectionView() {
+  const { settings, android, me, activeTransportId, sessionAuthenticated, rttMs } = store;
+  const [serverUrl, setServerUrl] = useState(settings.serverUrl || '');
+  const [onionUrl, setOnionUrl] = useState(settings.onionUrl || '');
+  const [i2pUrl, setI2pUrl] = useState(settings.i2pUrl || '');
+  const [localBridgeUrl, setLocalBridgeUrl] = useState(settings.localBridgeUrl || 'ws://127.0.0.1:27700');
+  const [customStunUrl, setCustomStunUrl] = useState(settings.customStunUrl || 'stun:stun.l.google.com:19302');
+
+  const onSaveNetwork = async () => {
+    await updateClientSettings({
+      serverUrl: serverUrl.trim(),
+      onionUrl: onionUrl.trim(),
+      i2pUrl: i2pUrl.trim(),
+      localBridgeUrl: localBridgeUrl.trim() || 'ws://127.0.0.1:27700',
+      customStunUrl: customStunUrl.trim(),
+    });
+    showToast('Сетевая и транспортная конфигурация применена');
+  };
+
+  return html`<div class="settings-sub-stack">
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="laptop" size=${16} /> Текущее устройство и активный сеанс</h3>
+      </div>
+
+      <div class="active-device-banner">
+        <div class="device-icon-badge">
+          <${Icon} name="laptop" size=${20} />
+        </div>
+        <div class="device-banner-info">
+          <b>${android.isApk ? 'Android смартфон · MeshChat APK' : 'Веб-клиент / Рабочая станция'}</b>
+          <span>
+            @${me?.username || 'local'} · v${APP_VERSION} · ${sessionAuthenticated ? `Онлайн (${activeTransportId}${rttMs ? `, ${rttMs} мс` : ''})` : 'Офлайн-режим'}
+          </span>
+        </div>
+        <span class="hero-status-pill online">Текущий</span>
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${toggleKeepScreenOn}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Удерживать экран включённым (FLAG_KEEP_SCREEN_ON)</div>
+            <div class="plugin-sub">Предотвращает засыпание экрана во время ретрансляции пакетов</div>
+          </div>
+          <button type="button" class=${`ios-switch ${android.keepScreenOn ? 'on' : ''}`}><span></span></button>
         </div>
 
-        <div class="settings-cat-pills">
-          ${SETTINGS_CATEGORIES.map((cat) => html`<button
-            key=${cat.id}
-            type="button"
-            class=${`cat-pill-btn ${!q && activeCat === cat.id ? 'active' : ''}`}
-            onClick=${() => {
-              setSearch('');
-              store.ui.settingsCategory = cat.id;
-              notifyStore();
-            }}
-          >
-            <${Icon} name=${cat.icon} size=${14} />
-            <span>${cat.label}</span>
-          </button>`)}
+        ${android.isApk && html`<div class="settings-switch-row" onClick=${toggleAndroidLanMesh}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Локальный Mesh-ретранслятор Wi-Fi LAN</div>
+            <div class="plugin-sub">
+              ${android.lanMeshRunning && android.lanUrl
+                ? `Активен локальный узел ${android.lanUrl}`
+                : 'Прямой обмен между смартфонами в одной Wi-Fi сети без интернета'}
+            </div>
+          </div>
+          <button type="button" class=${`ios-switch ${android.lanMeshRunning ? 'on' : ''}`}><span></span></button>
+        </div>`}
+      </div>
+
+      <div class="studio-actions" style="justify-content:flex-start">
+        <button type="button" class="btn-ghost compact" onClick=${rotateBlindMailbox}>
+          <${Icon} name="refresh" size=${14} /> Отозвать старые токены ящика
+        </button>
+      </div>
+    </div>
+
+    <div class="studio-card">
+      <div class="studio-card-head">
+        <h3><${Icon} name="radar" size=${16} /> Криптовыравнивание, ретранслятор и Tor / I2P</h3>
+      </div>
+
+      <label class="field-label">Квант выравнивания конвертов ISO/IEC 7816-4</label>
+      <div class="chip-grid">
+        ${[
+          [256, '256 Б'],
+          [512, '512 Б (стандарт)'],
+          [1024, '1024 Б'],
+          [2048, '2048 Б'],
+          [4096, '4096 Б'],
+        ].map(([bytes, lbl]) => html`<button
+          key=${bytes}
+          type="button"
+          class=${`choice-chip ${Number(settings.paddingBlockBytes || 512) === bytes ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ paddingBlockBytes: bytes })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Интервал синхронизации слепого ящика</label>
+      <div class="chip-grid">
+        ${[
+          [3, '3 сек'],
+          [6, '6 сек (оптимально)'],
+          [15, '15 сек'],
+          [30, '30 сек'],
+        ].map(([sec, lbl]) => html`<button
+          key=${sec}
+          type="button"
+          class=${`choice-chip ${Number(settings.syncIntervalSec || 6) === sec ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ syncIntervalSec: sec })}
+        >${lbl}</button>`)}
+      </div>
+
+      <label class="field-label">Политика кандидатов WebRTC ICE</label>
+      <div class="chip-grid">
+        ${[
+          ['all', 'Прямой P2P + TURN'],
+          ['relay', 'Только TURN (скрывать IP от пира)'],
+        ].map(([id, lbl]) => html`<button
+          key=${id}
+          type="button"
+          class=${`choice-chip ${(settings.webrtcIcePolicy || 'all') === id ? 'active' : ''}`}
+          onClick=${() => updateClientSettings({ webrtcIcePolicy: id })}
+        >${lbl}</button>`)}
+      </div>
+
+      <div class="settings-rows-list">
+        <div class="settings-switch-row" onClick=${() => updateClientSettings({ coverTraffic: !settings.coverTraffic })}>
+          <div class="plugin-copy">
+            <div class="plugin-title">Фоновый маскирующий Cover-трафик</div>
+            <div class="plugin-sub">Генерирует холостые пакеты против анализа времени активности</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.coverTraffic ? 'on' : ''}`}><span></span></button>
         </div>
       </div>
 
-      <!-- 1. ОФОРМЛЕНИЕ, ТЕМЫ И ТИПОГРАФИКА -->
-      ${showSection(
-        'appearance',
-        'оформление тема цвета палитра градиент новый год зима снежинки снегопад метель гирлянда сияние мороз стекло amoled шрифт размер текст плотность компактно аватар скругление пузыри узор сетка анимации хвостики'
-      ) && html`<${ThemeStudioCard} />`}
+      <label class="field-label">Быстрый выбор сервера ретрансляции</label>
+      <div class="chip-grid">
+        <button
+          type="button"
+          class="choice-chip"
+          onClick=${() => { setServerUrl(DEFAULT_CLOUD_URL); updateClientSettings({ serverUrl: DEFAULT_CLOUD_URL }); }}
+        >Облачный узел EU (Render)</button>
+        <button
+          type="button"
+          class="choice-chip"
+          onClick=${() => { setServerUrl(''); updateClientSettings({ serverUrl: '' }); }}
+        >Локальный узел</button>
+      </div>
 
-      <!-- 2. ЧАТЫ, ВВОД И ПОВЕДЕНИЕ МЕДИА -->
-      ${showSection(
-        'chats',
-        'чаты ввод сообщения enter отправка орфография ttl автоудаление таймер время секунды формат двойной клик тап ответ реакция медиа фото автозагрузка звонок подтверждение аватары'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="chat" size=${16} /> Чаты, клавиши ввода и медиафайлы</h3>
-        </div>
+      <label class="field-label">URL сервера ретрансляции</label>
+      <input
+        class="field-input"
+        type="text"
+        placeholder="https://meshchat-6a11.onrender.com"
+        value=${serverUrl}
+        onInput=${(e) => setServerUrl(e.target.value)}
+      />
 
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ enterToSend: settings.enterToSend === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Отправка клавишей Enter</div>
-              <div class="plugin-sub">
-                ${settings.enterToSend !== false
-                  ? 'Enter отправляет сообщение, Shift+Enter переносит строку'
-                  : 'Enter переносит строку, Ctrl+Enter отправляет сообщение'}
-              </div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.enterToSend !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ spellcheck: settings.spellcheck === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Проверка орфографии в поле ввода</div>
-              <div class="plugin-sub">Локальная подсветка опечаток системным словарём устройства</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.spellcheck !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ showChatAvatars: settings.showChatAvatars === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Аватары собеседников внутри ленты чата</div>
-              <div class="plugin-sub">Скройте для увеличения полезной ширины текста на узких экранах</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.showChatAvatars !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ confirmCall: !settings.confirmCall })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Подтверждение перед голосовым P2P-звонком</div>
-              <div class="plugin-sub">Защита от случайного нажатия на кнопку вызова в заголовке диалога</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.confirmCall ? 'on' : ''}`}><span></span></button>
-          </div>
-        </div>
-
-        <label class="field-label">Таймер автоудаления по умолчанию для новых диалогов (TTL)</label>
-        <div class="chip-grid">
-          ${[
-            [0, 'Бессрочно'],
-            [30, '30 сек'],
-            [300, '5 мин'],
-            [3600, '1 час'],
-            [86400, '24 часа'],
-            [604800, '7 дней'],
-          ].map(([sec, lbl]) => html`<button
-            key=${sec}
-            type="button"
-            class=${`choice-chip ${Number(settings.defaultTtlSec || 0) === sec ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ defaultTtlSec: sec })}
-          >${lbl}</button>`)}
-        </div>
-
-        <label class="field-label">Формат времени сообщений</label>
-        <div class="chip-grid">
-          ${[
-            ['24h', '24 часа (14:30)'],
-            ['24h_sec', 'С секундами (14:30:09)'],
-            ['12h', '12 часов (2:30 PM)'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.timeFormat || '24h') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ timeFormat: id })}
-          >${lbl}</button>`)}
-        </div>
-
-        <label class="field-label">Действие по двойному нажатию на сообщение</label>
-        <div class="chip-grid">
-          ${[
-            ['reply', 'Цитировать'],
-            ['copy', 'Скопировать текст'],
-            ['react', 'Отметка 👍'],
-            ['none', 'Отключено'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.doubleTapAction || 'reply') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ doubleTapAction: id })}
-          >${lbl}</button>`)}
-        </div>
-
-        <label class="field-label">Авторасшифровка входящих E2E-изображений</label>
-        <div class="chip-grid">
-          ${[
-            ['always', 'Всегда сразу'],
-            ['1mb', 'До 1 МиБ'],
-            ['manual', 'Только по нажатию'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.autoDecryptMedia || 'always') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ autoDecryptMedia: id })}
-          >${lbl}</button>`)}
-        </div>
-      </div>`}
-
-      <!-- 3. ПРИВАТНОСТЬ, PIN-БЛОКИРОВКА И МАСКИРОВКА ЭКРАНА -->
-      ${showSection(
-        'privacy',
-        'приватность безопасность pin пин код пароль автоблокировка скриншоты flag_secure экран подсветка буфер обмена очистка профиль анонимный шлюз маскировка таблица терминал заметки esc'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="lock" size=${16} /> Приватность, PIN-блокировка и защита экрана</h3>
-        </div>
-
-        <!-- Настройка PIN-кода -->
-        <div class="pin-config-box">
-          <div class="plugin-copy">
-            <div class="plugin-title">
-              Локальный PIN-код входа (${settings.pinHashB64 ? 'Активен · SHA-256 с солью' : 'Выключен'})
-            </div>
-            <div class="plugin-sub">
-              Защищает открытую сессию при передаче телефона в чужие руки или после таймера неактивности
-            </div>
-          </div>
-
-          ${!settings.pinHashB64
-            ? html`<div class="inline-form-row">
-                <input
-                  class="field-input"
-                  type="password"
-                  inputmode="numeric"
-                  maxLength="8"
-                  placeholder="Новый PIN (4–8 цифр)"
-                  value=${pinDraft}
-                  onInput=${(e) => setPinDraft(e.target.value.replace(/\D/g, ''))}
-                />
-                <button type="button" class="btn-primary compact" onClick=${onEnablePin}>
-                  Установить PIN
-                </button>
-              </div>`
-            : html`<div class="inline-form-row">
-                <input
-                  class="field-input"
-                  type="password"
-                  inputmode="numeric"
-                  maxLength="8"
-                  placeholder="Текущий PIN для отключения"
-                  value=${pinCurrent}
-                  onInput=${(e) => setPinCurrent(e.target.value.replace(/\D/g, ''))}
-                />
-                <button type="button" class="btn-ghost compact" onClick=${lockAppNow}>
-                  Заблокировать
-                </button>
-                <button type="button" class="btn-danger compact" onClick=${onDisablePin}>
-                  Отключить PIN
-                </button>
-              </div>`}
-        </div>
-
-        <label class="field-label">Автоблокировка при отсутствии активности</label>
-        <div class="chip-grid">
-          ${[
-            [0, 'Выключена'],
-            [1, '1 мин'],
-            [5, '5 мин'],
-            [15, '15 мин'],
-            [30, '30 мин'],
-          ].map(([m, lbl]) => html`<button
-            key=${m}
-            type="button"
-            class=${`choice-chip ${Number(settings.autoLockMinutes || 0) === m ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ autoLockMinutes: m })}
-          >${lbl}</button>`)}
-        </div>
-
-        <label class="field-label">Автоочистка буфера обмена после копирования ключей и текста</label>
-        <div class="chip-grid">
-          ${[
-            [0, 'Не очищать'],
-            [15, 'Через 15 сек'],
-            [30, 'Через 30 сек'],
-            [60, 'Через 60 сек'],
-          ].map(([sec, lbl]) => html`<button
-            key=${sec}
-            type="button"
-            class=${`choice-chip ${Number(settings.clipboardAutoClearSec || 0) === sec ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ clipboardAutoClearSec: sec })}
-          >${lbl}</button>`)}
-        </div>
-
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${toggleScreenshotProtection}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Защита от скриншотов и записи экрана (FLAG_SECURE)</div>
-              <div class="plugin-sub">
-                ${android.screenshotProtection
-                  ? 'Снимки экрана и превью в меню недавних приложений заблокированы ОС Android'
-                  : 'По умолчанию выключено — вы можете свободно делать скриншоты'}
-              </div>
-            </div>
-            <button type="button" class=${`ios-switch ${android.screenshotProtection ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${toggleKeepScreenOn}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Не выключать экран (FLAG_KEEP_SCREEN_ON)</div>
-              <div class="plugin-sub">Удерживает подсветку активной во время работы локального ретранслятора или чата</div>
-            </div>
-            <button type="button" class=${`ios-switch ${android.keepScreenOn ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ shareProfileE2ee: settings.shareProfileE2ee === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Передавать кастомный профиль собеседникам (E2EE)</div>
-              <div class="plugin-sub">Если выключено, контакты видят только ваш @username без аватара, био и баннера</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.shareProfileE2ee !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendReadReceipts: settings.sendReadReceipts === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Отправлять отчёты о прочтении (✓✓ Прочитано)</div>
-              <div class="plugin-sub">Уведомляет собеседника по E2EE о том, что вы открыли и прочитали его сообщения</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.sendReadReceipts !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sendTypingIndicators: settings.sendTypingIndicators === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Индикатор набора текста («печатает…»)</div>
-              <div class="plugin-sub">Отправляет зашифрованный сигнал набора текста в открытый диалог</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.sendTypingIndicators !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ previewInList: settings.previewInList === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Показывать превью сообщений в списке чатов</div>
-              <div class="plugin-sub">Отключите, чтобы скрыть последние реплики на главном экране от посторонних глаз</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.previewInList !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ acceptAnonGateway: settings.acceptAnonGateway === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Принимать сообщения через внешний E2E-шлюз (/q/${me?.username})</div>
-              <div class="plugin-sub">Позволяет отправлять вам зашифрованные обращения через браузер без регистрации</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.acceptAnonGateway !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ strictBossWipe: !settings.strictBossWipe })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Экстренная выгрузка ключей сессий из ОЗУ при блокировке</div>
-              <div class="plugin-sub">Очищает кеш расшифрованных ключей в CryptoWorker при двойном нажатии Esc</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.strictBossWipe ? 'on' : ''}`}><span></span></button>
-          </div>
-        </div>
-
-        <label class="field-label">Шаблон экрана мгновенной маскировки (Esc×2)</label>
-        <div class="chip-grid">
-          ${[
-            ['xlsx', 'Таблица бюджета XLSX'],
-            ['terminal', 'Терминал сборки Linux'],
-            ['notes', 'Инженерные заметки'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.bossTemplate || 'xlsx') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ bossTemplate: id })}
-          >${lbl}</button>`)}
-        </div>
-
-        <label class="field-label">Заголовок вкладки/окна в режиме маскировки</label>
-        <div class="inline-form-row">
+      <div class="settings-grid-2">
+        <div>
+          <label class="field-label">Скрытый сервис Tor (.onion)</label>
           <input
             class="field-input"
             type="text"
-            value=${bossDocTitle}
-            onInput=${(e) => setBossDocTitle(e.target.value)}
-            onBlur=${() => updateClientSettings({ bossDocTitle: bossDocTitle.trim() || 'Отчёт_Q4.xlsx' })}
+            placeholder="ws://xxxx.onion/ws"
+            value=${onionUrl}
+            onInput=${(e) => setOnionUrl(e.target.value)}
           />
-          <button type="button" class="btn-ghost compact" onClick=${() => toggleBossMode(true)}>
-            <${Icon} name="eyeOff" size=${14} /> Проверить
-          </button>
         </div>
-      </div>`}
-
-      <!-- 4. КРИПТОГРАФИЯ, MESH И МАРШРУТИЗАЦИЯ -->
-      ${showSection(
-        'network',
-        'криптография сеть mesh паддинг выравнивание 256 512 1024 2048 4096 cover шумовой трафик синхронизация опрос webrtc turn stun ip relay tor onion i2p прокси socks5 сервер ящик'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="radar" size=${16} /> Криптоядро, выравнивание пакетов и маршрутизация</h3>
+        <div>
+          <label class="field-label">Туннель I2P (.b32.i2p)</label>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="ws://xxxx.b32.i2p/ws"
+            value=${i2pUrl}
+            onInput=${(e) => setI2pUrl(e.target.value)}
+          />
         </div>
+      </div>
 
-        <label class="field-label">Квант выравнивания конвертов ISO/IEC 7816-4 (защита от анализа длины)</label>
-        <div class="chip-grid">
-          ${[
-            [256, '256 Б (эконом)'],
-            [512, '512 Б (стандарт)'],
-            [1024, '1024 Б'],
-            [2048, '2048 Б'],
-            [4096, '4096 Б (макс. маскировка)'],
-          ].map(([bytes, lbl]) => html`<button
-            key=${bytes}
-            type="button"
-            class=${`choice-chip ${Number(settings.paddingBlockBytes || 512) === bytes ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ paddingBlockBytes: bytes })}
-          >${lbl}</button>`)}
+      <div class="settings-grid-2">
+        <div>
+          <label class="field-label">Локальный мост SOCKS5</label>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="ws://127.0.0.1:27700"
+            value=${localBridgeUrl}
+            onInput=${(e) => setLocalBridgeUrl(e.target.value)}
+          />
         </div>
-
-        <label class="field-label">Интервал фоновой синхронизации слепого ящика и досылки очереди</label>
-        <div class="chip-grid">
-          ${[
-            [3, '3 сек (мгновенно)'],
-            [6, '6 сек (оптимально)'],
-            [15, '15 сек'],
-            [30, '30 сек (экономия заряда)'],
-          ].map(([sec, lbl]) => html`<button
-            key=${sec}
-            type="button"
-            class=${`choice-chip ${Number(settings.syncIntervalSec || 6) === sec ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ syncIntervalSec: sec })}
-          >${lbl}</button>`)}
+        <div>
+          <label class="field-label">Сервер STUN</label>
+          <input
+            class="field-input"
+            type="text"
+            placeholder="stun:stun.l.google.com:19302"
+            value=${customStunUrl}
+            onInput=${(e) => setCustomStunUrl(e.target.value)}
+          />
         </div>
+      </div>
 
-        <label class="field-label">Политика кандидатов WebRTC ICE при P2P-соединении и звонках</label>
-        <div class="chip-grid">
-          ${[
-            ['all', 'Прямой P2P + TURN (минимальная задержка)'],
-            ['relay', 'Только через TURN-ретранслятор (скрывать IP от пира)'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.webrtcIcePolicy || 'all') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ webrtcIcePolicy: id })}
-          >${lbl}</button>`)}
-        </div>
-
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ coverTraffic: !settings.coverTraffic })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Фоновый маскирующий Cover-трафик</div>
-              <div class="plugin-sub">Генерирует неотличимые холостые пакеты против временной корреляции</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.coverTraffic ? 'on' : ''}`}><span></span></button>
+      <label class="field-label">Политика сетевого транспорта</label>
+      <div class="policy-stack">
+        ${POLICY_LIST.map(([id, title, sub]) => html`<label
+          key=${id}
+          class=${`policy-card ${settings.transportPolicy === id ? 'selected' : ''}`}
+          onClick=${() => updateClientSettings({ transportPolicy: id })}
+        >
+          <div>
+            <div class="policy-title">${title}</div>
+            <div class="policy-desc">${sub}</div>
           </div>
+        </label>`)}
+      </div>
 
-          ${android.isApk && html`<div class="settings-switch-row" onClick=${toggleAndroidLanMesh}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Локальный Mesh-ретранслятор Wi-Fi LAN</div>
-              <div class="plugin-sub">
-                ${android.lanMeshRunning && android.lanUrl
-                  ? `Активен локальный узел ${android.lanUrl}`
-                  : 'Прямой обмен между смартфонами в одной Wi-Fi сети без интернета (:3000)'}
-              </div>
-            </div>
-            <button type="button" class=${`ios-switch ${android.lanMeshRunning ? 'on' : ''}`}><span></span></button>
+      <div class="studio-actions">
+        <button type="button" class="btn-ghost compact" onClick=${sendMeshTestPacket}>
+          Тест пакета (${settings.paddingBlockBytes || 512} Б)
+        </button>
+        <button type="button" class="btn-primary compact" onClick=${onSaveNetwork}>
+          Сохранить сеть
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────── Рендерер выбранного подраздела ───────────────────────
+
+function renderSectionDetail(sectionId) {
+  switch (sectionId) {
+    case 'account': return html`<${AccountSectionView} />`;
+    case 'chats': return html`<${ChatsSectionView} />`;
+    case 'reactions': return html`<${ReactionsSectionView} />`;
+    case 'privacy': return html`<${PrivacySectionView} />`;
+    case 'notifications': return html`<${NotificationsSectionView} />`;
+    case 'storage': return html`<${StorageSectionView} />`;
+    case 'folders': return html`<${FoldersSectionView} />`;
+    case 'devices': return html`<${DevicesNetworkSectionView} />`;
+    case 'power': return html`<${PowerSavingSectionView} />`;
+    case 'language': return html`<${LanguageSectionView} />`;
+    case 'updates': return html`<${UpdatesDiagnosticsSectionView} />`;
+    default: return html`<${ChatsSectionView} />`;
+  }
+}
+
+// ─────────────────────── Главный экран «Настройки» (Хаб разделов + Подразделы) ───────────────────────
+
+export function SettingsScreen() {
+  const { ui } = store;
+  const [search, setSearch] = useState('');
+  const [isWideDesktop, setIsWideDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= 1080 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onResize = () => setIsWideDesktop(window.innerWidth >= 1080);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const activeSectionId = ui.settingsSection || (isWideDesktop ? 'chats' : null);
+  const activeMeta = SETTINGS_SECTIONS_META.find((m) => m.id === activeSectionId) || null;
+
+  const q = search.trim().toLowerCase();
+  const searchMatches = q
+    ? SETTINGS_SEARCH_INDEX.filter(
+        (item) => item.title.toLowerCase().includes(q) || item.kw.toLowerCase().includes(q)
+      )
+    : [];
+
+  const toggleSearchBar = () => {
+    const next = !ui.settingsSearchOpen;
+    store.ui.settingsSearchOpen = next;
+    store.ui.settingsMenuOpen = false;
+    if (!next) setSearch('');
+    notifyStore();
+  };
+
+  const toggleOverflowMenu = () => {
+    store.ui.settingsMenuOpen = !ui.settingsMenuOpen;
+    notifyStore();
+  };
+
+  // Карточки разделов настроек (как в референсе: пастельный круг иконки + заголовок + описание / значение)
+  const renderHubList = () => html`<div class="settings-hub-list">
+    ${q
+      ? html`<div class="settings-search-results">
+          ${searchMatches.length === 0 && html`<div class="empty-list-hint">
+            По запросу «${search}» параметров не найдено.
+          </div>`}
+          ${searchMatches.map((hit, idx) => {
+            const meta = SETTINGS_SECTIONS_META.find((m) => m.id === hit.section);
+            return html`<button
+              key=${idx}
+              type="button"
+              class="settings-hub-card"
+              onClick=${() => {
+                setSearch('');
+                store.ui.settingsSearchOpen = false;
+                openSettingsSection(hit.section);
+              }}
+            >
+              <span
+                class="settings-pastel-circle"
+                style=${`background:${meta?.circleBg || '#8ec5fc'};color:${meta?.circleFg || '#0e2844'}`}
+              >
+                <${Icon} name=${meta?.icon || 'settings'} size=${20} />
+              </span>
+              <span class="settings-hub-copy">
+                <b class="settings-hub-title">${hit.title}</b>
+                <span class="settings-hub-sub">Раздел: ${getSectionTitle(meta)}</span>
+              </span>
+              <span class="settings-hub-chevron"><${Icon} name="chevronRight" size=${16} /></span>
+            </button>`;
+          })}
+        </div>`
+      : SETTINGS_SECTIONS_META.map((sec) => {
+          const rightVal = typeof sec.rightValue === 'function' ? sec.rightValue() : '';
+          const selectedOnDesktop = isWideDesktop && activeSectionId === sec.id;
+          return html`<button
+            key=${sec.id}
+            type="button"
+            class=${`settings-hub-card ${selectedOnDesktop ? 'active' : ''}`}
+            onClick=${() => openSettingsSection(sec.id)}
+          >
+            <span
+              class="settings-pastel-circle"
+              style=${`background:${sec.circleBg};color:${sec.circleFg}`}
+            >
+              <${Icon} name=${sec.icon} size=${20} />
+            </span>
+
+            <span class="settings-hub-copy">
+              <b class="settings-hub-title">${getSectionTitle(sec)}</b>
+              ${sec.sub && html`<span class="settings-hub-sub">${sec.sub}</span>`}
+            </span>
+
+            ${rightVal && html`<span class="settings-hub-value">${rightVal}</span>`}
+          </button>`;
+        })}
+  </div>`;
+
+  // На мобильных устройствах при открытом подразделе показываем отдельный чистый экран подраздела
+  if (!isWideDesktop && ui.settingsSection) {
+    return html`<section class="tab-screen settings-screen settings-subpage-mode">
+      <header class="settings-top-bar subpage">
+        <button
+          type="button"
+          class="settings-bar-icon-btn"
+          title="Назад к разделам настроек"
+          onClick=${closeSettingsSection}
+        >
+          <${Icon} name="back" size=${22} />
+        </button>
+
+        <div class="settings-subbar-title">
+          ${activeMeta && html`<span
+            class="settings-pastel-circle mini"
+            style=${`background:${activeMeta.circleBg};color:${activeMeta.circleFg}`}
+          >
+            <${Icon} name=${activeMeta.icon} size=${15} />
+          </span>`}
+          <h1>${getSectionTitle(activeMeta)}</h1>
+        </div>
+
+        <button
+          type="button"
+          class="settings-bar-icon-btn"
+          title="Новогодняя атмосфера и градиенты"
+          onClick=${() => { store.ui.modal = 'atmosphere'; notifyStore(); }}
+        >
+          <${Icon} name="snowflake" size=${18} />
+        </button>
+      </header>
+
+      <div class="mesh-scroll-body settings-detail-scroll">
+        ${renderSectionDetail(ui.settingsSection)}
+      </div>
+    </section>`;
+  }
+
+  return html`<section class="tab-screen settings-screen">
+    <!-- Верхняя панель в стиле референса: QR слева · Настройки по центру · Поиск и ⋮ справа -->
+    <header class="settings-top-bar">
+      <button
+        type="button"
+        class="settings-bar-icon-btn"
+        title="Моя QR-визитка"
+        onClick=${() => { store.ui.modal = 'qr'; notifyStore(); }}
+      >
+        <${Icon} name="qr" size=${21} />
+      </button>
+
+      <h1 class="settings-bar-center-title">${uiText('settings')}</h1>
+
+      <div class="settings-bar-right">
+        <button
+          type="button"
+          class=${`settings-bar-icon-btn ${ui.settingsSearchOpen ? 'active' : ''}`}
+          title="Поиск по всем настройкам"
+          onClick=${toggleSearchBar}
+        >
+          <${Icon} name="search" size=${20} />
+        </button>
+
+        <div class="settings-overflow-anchor">
+          <button
+            type="button"
+            class="settings-bar-icon-btn"
+            title="Быстрые действия"
+            onClick=${toggleOverflowMenu}
+          >
+            <${Icon} name="moreVert" size=${20} />
+          </button>
+
+          ${ui.settingsMenuOpen && html`<div class="settings-overflow-menu">
+            <button
+              type="button"
+              onClick=${() => { store.ui.settingsMenuOpen = false; store.ui.modal = 'atmosphere'; notifyStore(); }}
+            >
+              <${Icon} name="snowflake" size=${15} /> Атмосфера и градиенты
+            </button>
+            <button
+              type="button"
+              onClick=${() => { store.ui.settingsMenuOpen = false; lockAppNow(); }}
+            >
+              <${Icon} name="lock" size=${15} /> Заблокировать сейчас
+            </button>
+            <button
+              type="button"
+              onClick=${() => { store.ui.settingsMenuOpen = false; checkForUpdates({ silent: false }); }}
+            >
+              <${Icon} name="refresh" size=${15} /> Проверить обновления
+            </button>
+            <button
+              type="button"
+              onClick=${() => { store.ui.settingsMenuOpen = false; resetAllSettingsToDefaults(); }}
+            >
+              <${Icon} name="sliders" size=${15} /> Сбросить настройки
+            </button>
           </div>`}
         </div>
+      </div>
+    </header>
 
-        ${settings.coverTraffic && html`<div>
-          <label class="field-label">Период отправки шумовых Cover-пакетов</label>
-          <div class="chip-grid">
-            ${[
-              [10, 'Каждые 10 сек'],
-              [25, 'Каждые 25 сек'],
-              [60, 'Каждые 60 сек'],
-            ].map(([sec, lbl]) => html`<button
-              key=${sec}
-              type="button"
-              class=${`choice-chip ${Number(settings.coverIntervalSec || 25) === sec ? 'active' : ''}`}
-              onClick=${() => updateClientSettings({ coverIntervalSec: sec })}
-            >${lbl}</button>`)}
-          </div>
-        </div>`}
-
-        <label class="field-label">Быстрый выбор узла ретрансляции</label>
-        <div class="chip-grid">
-          <button
-            type="button"
-            class="choice-chip"
-            onClick=${() => { setServerUrl(DEFAULT_CLOUD_URL); updateClientSettings({ serverUrl: DEFAULT_CLOUD_URL }); }}
-          >Облачный узел EU (Render)</button>
-          <button
-            type="button"
-            class="choice-chip"
-            onClick=${() => { setServerUrl(''); updateClientSettings({ serverUrl: '' }); }}
-          >Встроенный локальный узел</button>
-        </div>
-
-        <label class="field-label">URL сервера ретрансляции</label>
+    ${ui.settingsSearchOpen && html`<div class="settings-search-drawer">
+      <div class="search-box settings-search-box">
+        <${Icon} name="search" size=${15} />
         <input
-          class="field-input"
           type="text"
-          placeholder="https://meshchat-6a11.onrender.com"
-          value=${serverUrl}
-          onInput=${(e) => setServerUrl(e.target.value)}
+          autofocus
+          placeholder="Найти настройку: обои, снег, PIN, реакции, папки, энергосбережение…"
+          value=${search}
+          onInput=${(e) => setSearch(e.target.value)}
         />
+        ${search && html`<button type="button" class="icon-btn small" onClick=${() => setSearch('')}>
+          <${Icon} name="close" size=${13} />
+        </button>`}
+      </div>
+    </div>`}
 
-        <div class="settings-grid-2">
-          <div>
-            <label class="field-label">Скрытый сервис Tor (.onion)</label>
-            <input
-              class="field-input"
-              type="text"
-              placeholder="ws://xxxx.onion/ws"
-              value=${onionUrl}
-              onInput=${(e) => setOnionUrl(e.target.value)}
-            />
-          </div>
-          <div>
-            <label class="field-label">Туннель I2P (.b32.i2p)</label>
-            <input
-              class="field-input"
-              type="text"
-              placeholder="ws://xxxx.b32.i2p/ws"
-              value=${i2pUrl}
-              onInput=${(e) => setI2pUrl(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div class="settings-grid-2">
-          <div>
-            <label class="field-label">Локальный мост SOCKS5 (Orbot / I2Pd)</label>
-            <input
-              class="field-input"
-              type="text"
-              placeholder="ws://127.0.0.1:27700"
-              value=${localBridgeUrl}
-              onInput=${(e) => setLocalBridgeUrl(e.target.value)}
-            />
-          </div>
-          <div>
-            <label class="field-label">Сервер STUN для WebRTC</label>
-            <input
-              class="field-input"
-              type="text"
-              placeholder="stun:stun.l.google.com:19302"
-              value=${customStunUrl}
-              onInput=${(e) => setCustomStunUrl(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <label class="field-label">Политика сетевого транспорта</label>
-        <div class="policy-stack">
-          ${POLICY_LIST.map(([id, title, sub]) => html`<label
-            key=${id}
-            class=${`policy-card ${settings.transportPolicy === id ? 'selected' : ''}`}
-            onClick=${() => updateClientSettings({ transportPolicy: id })}
-          >
-            <div>
-              <div class="policy-title">${title}</div>
-              <div class="policy-desc">${sub}</div>
+    ${isWideDesktop
+      ? html`<div class="settings-master-detail">
+          <aside class="settings-master-col">
+            ${renderHubList()}
+          </aside>
+          <div class="settings-detail-col">
+            <div class="settings-detail-hero">
+              ${activeMeta && html`<span
+                class="settings-pastel-circle mini"
+                style=${`background:${activeMeta.circleBg};color:${activeMeta.circleFg}`}
+              >
+                <${Icon} name=${activeMeta.icon} size=${16} />
+              </span>`}
+              <h2>${getSectionTitle(activeMeta)}</h2>
             </div>
-          </label>`)}
-        </div>
-
-        <div class="studio-actions">
-          <button type="button" class="btn-ghost compact" onClick=${sendMeshTestPacket}>
-            Тест пакета (${settings.paddingBlockBytes || 512} Б)
-          </button>
-          <button type="button" class="btn-ghost compact" onClick=${rotateBlindMailbox}>
-            Ротировать ящик
-          </button>
-          <button type="button" class="btn-primary compact" onClick=${onSaveNetwork}>
-            Применить сеть
-          </button>
-        </div>
-      </div>`}
-
-      <!-- 5. ЗВУК, УВЕДОМЛЕНИЯ И ТАКТИЛЬНЫЙ ОТКЛИК -->
-      ${showSection(
-        'sound',
-        'звук уведомления оповещения фоновые android аудио синтезатор мелодия кристалл импульс сонар мягкий вибрация отклик haptics'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="volume" size=${16} /> Системные уведомления, звук и виброотклик</h3>
-        </div>
-
-        <label class="field-label">Приватность текста фоновых уведомлений ОС</label>
-        <div class="chip-grid">
-          ${[
-            ['full', 'Имя и текст'],
-            ['sender', 'Только имя'],
-            ['stealth', 'Скрытно (без имён)'],
-            ['off', 'Выключены'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.notificationContent || 'sender') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ notificationContent: id })}
-          >${lbl}</button>`)}
-          <button type="button" class="btn-ghost compact" onClick=${requestSystemNotificationAccess}>
-            Разрешить в ОС
-          </button>
-        </div>
-
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ sound: settings.sound === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Звук входящих сообщений</div>
-              <div class="plugin-sub">Чистый синтез WebAudio API локально без внешних медиафайлов</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.sound !== false ? 'on' : ''}`}><span></span></button>
+            ${renderSectionDetail(activeSectionId)}
           </div>
-
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ outgoingSound: settings.outgoingSound === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Звуковой сигнал при отправке сообщения</div>
-              <div class="plugin-sub">Короткий акустический подтверждающий импульс при доставке в конверт</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.outgoingSound !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-        </div>
-
-        <label class="field-label">Акустический профиль синтезатора</label>
-        <div class="chip-grid">
-          ${[
-            ['crystal', 'Кристалл'],
-            ['pulse', 'Импульс'],
-            ['sonar', 'Сонар'],
-            ['soft', 'Мягкий тон'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.soundProfile || 'crystal') === id ? 'active' : ''}`}
-            onClick=${() => {
-              updateClientSettings({ soundProfile: id });
-              playSfx('incoming', id);
-            }}
-          >${lbl}</button>`)}
-          <button
-            type="button"
-            class="btn-ghost compact"
-            onClick=${() => playSfx('incoming', settings.soundProfile || 'crystal')}
-          >Прослушать</button>
-        </div>
-
-        <label class="field-label">Тактильная вибрация (Android Vibrator / Haptics)</label>
-        <div class="chip-grid">
-          ${[
-            ['off', 'Выключена'],
-            ['soft', 'Мягкий отклик'],
-            ['strong', 'Чёткий импульс'],
-          ].map(([id, lbl]) => html`<button
-            key=${id}
-            type="button"
-            class=${`choice-chip ${(settings.haptics || 'soft') === id ? 'active' : ''}`}
-            onClick=${() => updateClientSettings({ haptics: id })}
-          >${lbl}</button>`)}
-        </div>
-      </div>`}
-
-      <!-- 6. ПАМЯТЬ, ЗАШИФРОВАННЫЙ БЭКАП И ОБНОВЛЕНИЯ -->
-      ${showSection(
-        'storage',
-        'память хранилище кеш база очистить история резервная копия бэкап экспорт импорт aes pbkdf2 обновление github apk сброс ключи выход'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="database" size=${16} /> Локальное хранилище и зашифрованный резерв</h3>
-        </div>
-
-        <div class="storage-stats-grid">
-          <div class="stat-mini-box">
-            <b>${stats.dmCount}</b>
-            <span>Контактов</span>
-          </div>
-          <div class="stat-mini-box">
-            <b>${stats.msgCount}</b>
-            <span>Сообщений</span>
-          </div>
-          <div class="stat-mini-box">
-            <b>${stats.mediaCached}</b>
-            <span>Медиа в ОЗУ</span>
-          </div>
-          <div class="stat-mini-box">
-            <b>${formatBytes(stats.approxBytes)}</b>
-            <span>База E2EE</span>
-          </div>
-        </div>
-
-        <div class="studio-actions" style="justify-content:flex-start">
-          <button type="button" class="btn-ghost compact" onClick=${clearDecryptedMediaCache}>
-            Освободить медиа из ОЗУ
-          </button>
-          <button type="button" class="btn-ghost compact" onClick=${clearAllMessagesHistory}>
-            <${Icon} name="trash" size=${13} /> Очистить историю чатов
-          </button>
-        </div>
-
-        <label class="field-label">Резервная копия истории, контактов и настроек (AES-256-GCM + PBKDF2 210k)</label>
-        <input
-          class="field-input"
-          type="password"
-          placeholder="Парольная фраза шифрования архива (минимум 6 символов)"
-          value=${backupPass}
-          onInput=${(e) => setBackupPass(e.target.value)}
-        />
-        <input
-          ref=${backupFileRef}
-          type="file"
-          accept=".json,application/json"
-          hidden
-          onChange=${onImportVaultFile}
-        />
-        <div class="studio-actions" style="justify-content:flex-start">
-          <button type="button" class="btn-primary compact" onClick=${onExportVault}>
-            <${Icon} name="download" size=${14} /> Экспорт .enc.json
-          </button>
-          <button type="button" class="btn-ghost compact" onClick=${() => backupFileRef.current?.click()}>
-            <${Icon} name="upload" size=${14} /> Импорт .enc.json
-          </button>
-        </div>
-      </div>`}
-
-      ${showSection(
-        'storage',
-        'обновление github apk версия сборка сброс заводские ключи выход устройство'
-      ) && html`<div class="studio-card">
-        <div class="studio-card-head">
-          <h3><${Icon} name="download" size=${16} /> Автообновление через GitHub Releases</h3>
-        </div>
-        <div class="settings-rows-list">
-          <div class="settings-switch-row" onClick=${() => updateClientSettings({ autoUpdateCheck: settings.autoUpdateCheck === false })}>
-            <div class="plugin-copy">
-              <div class="plugin-title">Фоновая проверка новых релизов GitHub</div>
-              <div class="plugin-sub">Автоматически отключается в строгих анонимных режимах Tor-Only и I2P-Only</div>
-            </div>
-            <button type="button" class=${`ios-switch ${settings.autoUpdateCheck !== false ? 'on' : ''}`}><span></span></button>
-          </div>
-        </div>
-        <p class="modal-desc">
-          Пакет <code>${android.packageName}</code> (v${APP_VERSION}, build ${APP_VERSION_CODE}) подписан постоянным
-          сертификатом релиза и обновляется поверх установленной версии с сохранением аккаунта и чатов.
-        </p>
-        <div class="studio-actions">
-          <button
-            type="button"
-            class="btn-ghost compact"
-            disabled=${update.checking}
-            onClick=${() => checkForUpdates({ silent: false })}
-          >
-            <${Icon} name="refresh" size=${14} /> ${update.checking ? 'Проверка…' : 'Проверить релизы'}
-          </button>
-          <button type="button" class="btn-primary compact" onClick=${applyAppUpdate}>
-            <${Icon} name="download" size=${14} /> ${update.available ? `Установить v${update.remoteVersion}` : 'Скачать актуальный APK'}
-          </button>
-        </div>
-      </div>`}
-
-      ${showSection(
-        'storage',
-        'сброс настройки опасная зона стереть ключи выйти удалить аккаунт устройство'
-      ) && html`<div class="studio-card danger-zone">
-        <div class="studio-card-head">
-          <h3><${Icon} name="key" size=${16} /> Сброс параметров и ключи устройства</h3>
-        </div>
-        <p class="modal-desc">
-          Вы можете сбросить все визуальные и сетевые параметры к стандартным без потери аккаунта, либо полностью
-          уничтожить ключи на этом устройстве.
-        </p>
-        <div class="studio-actions" style="justify-content:space-between">
-          <button type="button" class="btn-ghost compact" onClick=${resetAllSettingsToDefaults}>
-            Сбросить настройки (сохранить аккаунт)
-          </button>
-          ${!wipeConfirm
-            ? html`<button type="button" class="btn-danger compact" onClick=${() => setWipeConfirm(true)}>
-                Стереть ключи и выйти…
-              </button>`
-            : html`<div class="wipe-confirm-row">
-                <button type="button" class="btn-ghost compact" onClick=${() => setWipeConfirm(false)}>Отмена</button>
-                <button type="button" class="btn-danger compact" onClick=${logoutAndWipeDevice}>
-                  Подтвердить уничтожение
-                </button>
-              </div>`}
-        </div>
-      </div>`}
-    </div>
+        </div>`
+      : html`<div class="mesh-scroll-body settings-hub-scroll">
+          ${renderHubList()}
+        </div>`}
   </section>`;
 }

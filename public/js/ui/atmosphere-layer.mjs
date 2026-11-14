@@ -5,7 +5,7 @@
 // Автоматически приостанавливает цикл отрисовки при сворачивании вкладки/приложения (0% расхода батареи в фоне).
 
 import { html, useEffect, useRef } from '../../vendor/preact.mjs';
-import { store } from '../store/app-store.mjs';
+import { store, isPowerSavingActive } from '../store/app-store.mjs';
 
 const GARLAND_PALETTES = {
   classic: ['#ff4d6d', '#fbbf24', '#10b981', '#38bdf8', '#f97316', '#a855f7'],
@@ -95,13 +95,15 @@ export function FestiveGarland({ styleId = 'classic' }) {
 /** Полноэкранный атмосферный слой снежинок, полярного сияния и новогодней гирлянды */
 export function AtmosphereLayer() {
   const canvasRef = useRef(null);
-  const { theme } = store;
+  const { theme, settings } = store;
 
-  const effect = theme.ambientEffect || 'snowfall';
+  const pwrSave = isPowerSavingActive();
+  const effect = pwrSave && settings.powerPauseSnow !== false ? 'none' : (theme.ambientEffect || 'snowfall');
   const density = theme.snowDensity || 'medium';
-  const garlandOn = Boolean(theme.garlandEnabled);
+  const garlandOn = Boolean(theme.garlandEnabled) && !(pwrSave && settings.powerPauseGarland !== false);
   const garlandStyle = theme.garlandStyle || 'classic';
   const animationsOn = theme.animations !== false;
+  const limit30Fps = pwrSave && settings.powerReduceFps !== false;
 
   useEffect(() => {
     if (!animationsOn || effect === 'none') return undefined;
@@ -175,9 +177,15 @@ export function AtmosphereLayer() {
 
     const particles = Array.from({ length: count }, () => createParticle(true));
     let tick = 0;
+    let lastDrawAt = 0;
 
-    const renderFrame = () => {
+    const renderFrame = (now = 0) => {
       if (paused) return;
+      if (limit30Fps && now - lastDrawAt < 33) {
+        rafId = window.requestAnimationFrame(renderFrame);
+        return;
+      }
+      lastDrawAt = now;
       tick += 1;
       ctx.clearRect(0, 0, width, height);
 
@@ -282,7 +290,7 @@ export function AtmosphereLayer() {
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [effect, density, animationsOn]);
+  }, [effect, density, animationsOn, limit30Fps]);
 
   return html`<div class="atmosphere-root" aria-hidden="true">
     ${garlandOn && html`<${FestiveGarland} styleId=${garlandStyle} />`}

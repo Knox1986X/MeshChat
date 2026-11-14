@@ -17,6 +17,8 @@ import {
   dismissUpdateBanner,
   dismissToast,
   setNavTab,
+  closeSettingsSection,
+  uiText,
 } from '../store/app-store.mjs';
 import { Sidebar } from './sidebar.mjs';
 import { ChatView } from './chat-view.mjs';
@@ -264,9 +266,23 @@ export function AppRoot() {
     </div>`;
   }
 
-  const totalUnread = Object.values(s.chats).reduce((sum, c) => sum + (c.unread || 0), 0);
+  const cntMode = s.settings.unreadCounterMode || 'unmuted';
+  const totalUnread = cntMode === 'off'
+    ? 0
+    : Object.values(s.chats).reduce(
+        (sum, c) => sum + (cntMode === 'unmuted' && c.muted ? 0 : (c.unread || 0)),
+        0
+      );
   const navTab = s.ui.navTab || 'chats';
   const hideBottomNavOnMobile = navTab === 'chats' && Boolean(s.ui.activeChatId);
+
+  const onNavPress = (tabId) => {
+    if (tabId === 'settings' && navTab === 'settings' && s.ui.settingsSection) {
+      closeSettingsSection();
+      return;
+    }
+    setNavTab(tabId);
+  };
 
   return html`<div class="app-shell">
     <${AtmosphereLayer} />
@@ -281,15 +297,15 @@ export function AppRoot() {
             key=${item.id}
             type="button"
             class=${`rail-btn ${navTab === item.id ? 'active' : ''}`}
-            title=${item.label}
-            onClick=${() => setNavTab(item.id)}
+            title=${uiText(item.id)}
+            onClick=${() => onNavPress(item.id)}
           >
             <span class="rail-icon-wrap">
               <${Icon} name=${item.icon} size=${20} />
-              ${item.id === 'chats' && totalUnread > 0 && html`<i class="nav-unread-dot">${totalUnread > 9 ? '9+' : totalUnread}</i>`}
+              ${item.id === 'chats' && totalUnread > 0 && html`<i class="nav-unread-dot">${totalUnread > 99 ? '99+' : totalUnread}</i>`}
               ${item.id === 'settings' && s.update?.available && html`<i class="nav-update-dot"></i>`}
             </span>
-            <span class="rail-lbl">${item.label}</span>
+            <span class="rail-lbl">${uiText(item.id)}</span>
           </button>`)}
         </div>
       </nav>
@@ -323,14 +339,14 @@ export function AppRoot() {
           key=${item.id}
           type="button"
           class=${`bottom-nav-btn ${navTab === item.id ? 'active' : ''}`}
-          onClick=${() => setNavTab(item.id)}
+          onClick=${() => onNavPress(item.id)}
         >
           <span class="bottom-nav-icon">
             <${Icon} name=${item.icon} size=${20} />
-            ${item.id === 'chats' && totalUnread > 0 && html`<i class="nav-unread-dot">${totalUnread > 9 ? '9+' : totalUnread}</i>`}
+            ${item.id === 'chats' && totalUnread > 0 && html`<i class="nav-unread-dot">${totalUnread > 99 ? '99+' : totalUnread}</i>`}
             ${item.id === 'settings' && s.update?.available && html`<i class="nav-update-dot"></i>`}
           </span>
-          <span class="bottom-nav-lbl">${item.label}</span>
+          <span class="bottom-nav-lbl">${uiText(item.id)}</span>
         </button>`)}
       </nav>
     </div>
