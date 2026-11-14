@@ -42,8 +42,8 @@ export function pickColor(seedStr = '') {
   return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
 }
 
-export const APP_VERSION = '1.9.0';
-export const APP_VERSION_CODE = 10;
+export const APP_VERSION = '2.0.0';
+export const APP_VERSION_CODE = 11;
 export const GITHUB_REPO = 'Knox1986X/MeshChat';
 export const DEFAULT_CLOUD_URL = 'https://meshchat-6a11.onrender.com';
 
@@ -575,7 +575,8 @@ export const DEFAULT_SETTINGS = {
   clipboardAutoClearSec: 0,   // 0 | 15 | 30 | 60
   shareProfileE2ee: true,
   acceptAnonGateway: true,
-  notificationContent: 'sender', // 'full' | 'sender' | 'stealth' | 'off'
+  notificationContent: 'full', // 'full' | 'sender' | 'stealth' | 'off'
+  bgKeepAlive: true,
   strictBossWipe: false,
   bossTemplate: 'xlsx',       // 'xlsx' | 'terminal' | 'notes'
   bossDocTitle: 'Финансовая_модель_Q4_консолидация.xlsx',
@@ -969,30 +970,72 @@ export function downloadBytesCrossPlatform(bytesOrText, filename, mime = 'applic
   return false;
 }
 
-function emitBackgroundNotification(senderTitle, previewText) {
-  const mode = store.settings.notificationContent || 'sender';
-  if (mode === 'off') return;
+function emitSystemShadeNotification(chatId, senderTitle, previewText, { isCall = false, force = false } = {}) {
+  const mode = store.settings.notificationContent || 'full';
+  if (mode === 'off' && !force) return;
 
   const title = mode === 'stealth' ? 'MeshChat' : (senderTitle || 'MeshChat');
-  const body =
-    mode === 'full'
+  const body = isCall
+    ? (mode === 'stealth' ? 'Входящий зашифрованный вызов' : 'Входящий голосовой звонок E2EE')
+    : mode === 'full'
       ? (previewText || 'Зашифрованное вложение')
       : 'Новое зашифрованное сообщение (E2EE)';
 
   try {
+    if (globalThis.MeshChatAndroid?.showChatNotification) {
+      globalThis.MeshChatAndroid.showChatNotification(chatId || 'general', title, body, Boolean(isCall));
+      return;
+    }
     if (globalThis.MeshChatAndroid?.showLocalNotification) {
       globalThis.MeshChatAndroid.showLocalNotification(title, body);
       return;
     }
     if (
-      typeof document !== 'undefined' &&
-      document.hidden &&
       typeof Notification !== 'undefined' &&
-      Notification.permission === 'granted'
+      Notification.permission === 'granted' &&
+      (force || typeof document === 'undefined' || document.hidden)
     ) {
-      new Notification(title, { body, tag: 'meshchat-msg' });
+      const n = new Notification(title, {
+        body,
+        tag: `meshchat-${chatId || 'general'}`,
+      });
+      n.onclick = () => {
+        try { window.focus?.(); } catch {}
+        if (chatId && store.chats[chatId]) selectChat(chatId);
+      };
     }
   } catch { /* ignore */ }
+}
+
+export async function sendTestShadeNotification() {
+  if (globalThis.MeshChatAndroid?.hasNotificationPermission && !globalThis.MeshChatAndroid.hasNotificationPermission()) {
+    globalThis.MeshChatAndroid.requestNotificationPermission?.();
+    showToast('Разрешите показ уведомлений в появившемся окне Android');
+    return;
+  }
+  if (!globalThis.MeshChatAndroid && typeof Notification !== 'undefined' && Notification.permission !== 'granted') {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      showToast('Системные уведомления заблокированы браузером', 'err');
+      return;
+    }
+  }
+  emitSystemShadeNotification(
+    'echo:loopback',
+    'MeshChat · Проверка шторки',
+    'Уведомления в шторке Android активны и готовы к приёму E2EE-сообщений',
+    { isCall: false, force: true }
+  );
+  showToast('Тестовое уведомление отправлено в шторку');
+}
+
+export function toggleAndroidBackgroundService(enabled) {
+  const next = Boolean(enabled);
+  try {
+    globalThis.MeshChatAndroid?.setBackgroundKeepAlive?.(next);
+  } catch {}
+  updateClientSettings({ bgKeepAlive: next });
+  showToast(next ? 'Фоновая доставка в шторку включена' : 'Фоновая служба остановлена');
 }
 
 function recordRttSample(ms) {
@@ -1553,12 +1596,37 @@ export async function bootClientApp() {
       if (store.settings.autoUpdateCheck !== false) checkForUpdates({ silent: true });
     }, 5 * 60 * 1000);
 
+    const consumeNotificationTarget = () => {
+      try {
+        const pendingCid = globalThis.MeshChatAndroid?.consumePendingNotificationChatId?.();
+        if (pendingCid && store.chats[pendingCid]) {
+          selectChat(pendingCid);
+        }
+      } catch {}
+    };
+
+    window.__meshOpenChatFromNotification = (chatId) => {
+      try {
+        globalThis.MeshChatAndroid?.consumePendingNotificationChatId?.();
+      } catch {}
+      if (chatId && store.chats[chatId]) {
+        selectChat(chatId);
+      } else {
+        store.ui.navTab = 'chats';
+        notifyStore();
+      }
+    };
+    consumeNotificationTarget();
+
     document.addEventListener?.('visibilitychange', () => {
       if (document.visibilityState === 'visible') onWakeUp();
     });
     window.addEventListener?.('online', onWakeUp);
     window.addEventListener?.('focus', onWakeUp);
-    window.addEventListener?.('meshchat:resume', onWakeUp);
+    window.addEventListener?.('meshchat:resume', () => {
+      consumeNotificationTarget();
+      onWakeUp();
+    });
   }
 }
 
@@ -1958,6 +2026,12 @@ function bindServerPushEvents(rpc) {
     });
   });
 
+  rpc.onEvent('voice.frame', (_meta, packetBytes) => {
+    if (!packetBytes) return;
+    const copy = packetBytes instanceof Uint8Array ? new Uint8Array(packetBytes) : new Uint8Array(packetBytes);
+    callManager.handleIncomingVoiceFrame(copy).catch(() => {});
+  });
+
   rpc.onEvent('keys.lowOpk', async () => {
     try {
       const moreOpks = await cryptoWorker.call('replenishOneTimePreKeys', { count: 50 });
@@ -2095,17 +2169,15 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     applyPeerProfileToChat(store.chats[chatId], payload.senderProfile);
   }
 
-  // Обработка E2EE сигналинга голосовых вызовов DTLS-SRTP
+  // Обработка E2EE сигналинга голосовых вызовов (Dual-Engine: DTLS-SRTP + AES-256-GCM Relay)
   if (payload.type === 'call-signal') {
-    await callManager.handleIncomingSignal(store.chats[chatId], payload, {
-      getIceServers: fetchCurrentIceServers,
-      iceTransportPolicy: store.settings.webrtcIcePolicy || 'all',
-      transportPolicy: store.settings.transportPolicy,
-    });
-    if (payload.action === 'offer' && !store.chats[chatId].muted) {
-      emitBackgroundNotification(
+    await callManager.handleIncomingSignal(store.chats[chatId], payload);
+    if (payload.action === 'offer' && !store.chats[chatId].muted && !isQuietHoursNow()) {
+      emitSystemShadeNotification(
+        chatId,
         store.chats[chatId].peerProfile?.displayName || store.chats[chatId].title,
-        'Входящий голосовой вызов (DTLS-SRTP)'
+        'Входящий голосовой звонок E2EE',
+        { isCall: true }
       );
     }
     return;
@@ -2233,7 +2305,9 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
         : `[Файл] ${msg.media.name}`)
     : msg.text.slice(0, 90);
 
+  const isAppForeground = !(typeof document !== 'undefined' && document.hidden);
   const isChatVisible =
+    isAppForeground &&
     store.ui.activeChatId === chatId &&
     store.ui.navTab === 'chats' &&
     !store.ui.bossActive &&
@@ -2243,7 +2317,7 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     chat.unread = (chat.unread || 0) + 1;
   }
 
-  // Отправляем E2EE-квитанцию о получении (или сразу о прочтении, если чат открыт)
+  // Отправляем E2EE-квитанцию о получении (или сразу о прочтении, если чат реально открыт на экране)
   const receiptKind = isChatVisible && store.settings.sendReadReceipts !== false ? 'read' : 'delivered';
   msg.readSent = receiptKind === 'read';
   deliverPayloadToPeer(chat, { type: 'receipt', kind: receiptKind, msgIds: [msg.id] }).catch(() => {});
@@ -2254,12 +2328,17 @@ async function processIncomingEnvelope(envId, sealedBytes, { skipImmediateAck = 
     }
     triggerHaptic('heavy');
   }
-  if (!chat.muted && !isChatVisible && store.settings.inAppBannerToast !== false && !store.ui.bossActive && !store.ui.pinLocked) {
+  if (!chat.muted && !isChatVisible && isAppForeground && store.settings.inAppBannerToast !== false && !store.ui.bossActive && !store.ui.pinLocked) {
     const senderLabel = chat.peerProfile?.displayName || chat.title;
     showToast(`${senderLabel}: ${(chat.lastPreview || 'Новое сообщение').slice(0, 56)}`);
   }
-  if (!chat.muted && !isQuietHoursNow()) {
-    emitBackgroundNotification(chat.peerProfile?.displayName || chat.title, chat.lastPreview);
+  if (!chat.muted && !isChatVisible && !isQuietHoursNow()) {
+    emitSystemShadeNotification(
+      chatId,
+      chat.peerProfile?.displayName || chat.title,
+      chat.lastPreview,
+      { isCall: false }
+    );
   }
 
   // Автоматическая предрасшифровка входящих изображений по политике медиа
@@ -2682,6 +2761,9 @@ export function markChatRead(chatId) {
   const chat = store.chats[chatId];
   if (!chat) return;
   chat.unread = 0;
+  try {
+    globalThis.MeshChatAndroid?.cancelChatNotification?.(chatId);
+  } catch {}
   if (chat.kind === 'dm' && store.settings.sendReadReceipts !== false) {
     const list = store.messages[chatId] || [];
     const unreadIds = list.filter((m) => !m.out && !m.readSent).map((m) => m.id);
@@ -3600,38 +3682,116 @@ async function persistChatsAndMessages() {
   ]);
 }
 
-// ─────────────── Голосовые E2EE P2P вызовы (DTLS-SRTP) и системные уведомления ───────────────
+// ─────────────── Голосовые E2EE вызовы (Dual-Engine: DTLS-SRTP + AES-256-GCM Relay) ───────────────
 
 async function fetchCurrentIceServers() {
+  const defaultStun = [
+    {
+      urls: [
+        'stun:stun.cloudflare.com:3478',
+        'stun:stun.l.google.com:19302',
+      ],
+    },
+  ];
   const customStun = (store.settings.customStunUrl || '').trim();
-  const fallbackStun = customStun ? [{ urls: customStun }] : [];
-  if (!rpcChannel || !activeTransport?.isConnected) return fallbackStun;
+  const extraStun = customStun ? [{ urls: customStun }] : [];
+  if (!rpcChannel || !activeTransport?.isConnected) {
+    return [...defaultStun, ...extraStun];
+  }
   try {
     const { data } = await rpcChannel.request('turn.credentials', {});
-    return [...(data.iceServers || []), ...fallbackStun];
+    return [...(data?.iceServers || defaultStun), ...extraStun];
   } catch {
-    return fallbackStun;
+    return [...defaultStun, ...extraStun];
   }
 }
 
-const callManager = new E2eeCallManager({
-  sendSignalToChat: async (chat, sigPayload) => {
-    await deliverPayloadToPeer(chat, sigPayload);
-  },
-  onRingTick: () => {
-    const chat = store.chats[callManager.state.chatId];
-    if (!chat?.muted && !store.ui.bossActive && !store.ui.pinLocked && !isQuietHoursNow()) {
-      if (store.settings.sound !== false) playSfx('ring', store.settings.callRingtone || 'northern');
-      triggerHaptic('heavy');
+async function deliverCallSignalToPeer(chat, sigPayload) {
+  if (!chat || !chat.peerId) throw new Error('Контакт для звонка не выбран');
+  await ensureOutgoingSessionForChat(chat);
+  const { sealedBytes } = await cryptoWorker.call('encryptMessageForPeer', {
+    peerId: chat.peerId,
+    payloadObject: sigPayload,
+  });
+  await sendSealedEnvelopeWithRefresh(chat, sealedBytes, 60);
+}
+
+async function deliverVoiceFrameToPeer(chat, packetBytes) {
+  if (!chat?.mailboxId || !chat?.mailboxWriteToken || !rpcChannel || !activeTransport?.isConnected) {
+    return;
+  }
+  const writeProof = await computeMailboxWriteProof(chat.mailboxWriteToken, packetBytes);
+  await rpcChannel.request(
+    'voice.frame',
+    { mailboxId: chat.mailboxId, writeProof },
+    { body: packetBytes }
+  );
+}
+
+let callRingTimer = null;
+
+function syncCallRingLoop(status, chatId) {
+  const shouldRing = status === 'incoming' || status === 'outgoing';
+  if (!shouldRing) {
+    if (callRingTimer) {
+      clearInterval(callRingTimer);
+      callRingTimer = null;
     }
+    return;
+  }
+  if (callRingTimer) return;
+  const playTick = () => {
+    const chat = chatId ? store.chats[chatId] : null;
+    if (!chat?.muted && !store.ui.bossActive && !store.ui.pinLocked && !isQuietHoursNow()) {
+      if (store.settings.sound !== false) {
+        playSfx('ring', store.settings.callRingtone || 'northern');
+      }
+      if (status === 'incoming') triggerHaptic('heavy');
+    }
+  };
+  playTick();
+  callRingTimer = setInterval(playTick, 2400);
+  callRingTimer.unref?.();
+}
+
+const callManager = new E2eeCallManager({
+  getIceServers: fetchCurrentIceServers,
+  getIceTransportPolicy: () => (store.settings.webrtcIcePolicy === 'relay' ? 'relay' : 'all'),
+  sendSignalToChat: deliverCallSignalToPeer,
+  sendVoiceFrameToChat: deliverVoiceFrameToPeer,
+  onNotice: (msg, kind = 'info') => {
+    showToast(msg, kind === 'error' ? 'err' : 'ok');
   },
-  onStateChange: () => {
-    store.call = callManager.state.active ? { ...callManager.state } : null;
-    if (store.call) {
+  onStateChange: (st) => {
+    syncCallRingLoop(st.status, st.chatId);
+    if (st.status && st.status !== 'idle') {
+      store.call = {
+        active: true,
+        status: st.status,
+        phase: st.status === 'incoming' || st.status === 'outgoing' ? 'ringing' : st.status,
+        direction: st.status === 'incoming' ? 'incoming' : 'outgoing',
+        callId: st.callId,
+        chatId: st.chatId,
+        peerTitle: st.peerName,
+        peerName: st.peerName,
+        muted: Boolean(st.muted),
+        speaker: Boolean(st.speaker),
+        elapsedSec: st.durationSec || 0,
+        durationSec: st.durationSec || 0,
+        dtlsSas: st.sasEmojis || '',
+        sasEmojis: st.sasEmojis || '',
+        micLevel: st.muted ? 0 : 42,
+        relayOnly: st.icePolicy === 'relay' || st.transportMode === 'relay-e2ee',
+        transportMode: st.transportMode || 'negotiating',
+        micAvailable: st.micAvailable !== false,
+      };
       store.ui.modal = 'call';
-    } else if (store.ui.modal === 'call') {
-      store.ui.modal = null;
-      store.ui.modalData = null;
+    } else {
+      store.call = null;
+      if (store.ui.modal === 'call') {
+        store.ui.modal = null;
+        store.ui.modalData = null;
+      }
     }
     notifyStore();
   },
@@ -3639,41 +3799,53 @@ const callManager = new E2eeCallManager({
 
 export async function startVoiceCall(chatId) {
   const chat = store.chats[chatId];
-  if (!chat || chat.kind !== 'dm') return;
+  if (!chat || chat.kind !== 'dm') {
+    showToast('Голосовые звонки доступны в личных E2EE-диалогах', 'err');
+    return;
+  }
   try {
-    const iceServers = await fetchCurrentIceServers();
+    if (!activeTransport?.isConnected) {
+      await syncNow();
+    }
     await callManager.startOutgoingCall({
       chat,
-      iceServers,
-      iceTransportPolicy: store.settings.webrtcIcePolicy || 'all',
       transportPolicy: store.settings.transportPolicy,
     });
   } catch (err) {
-    showToast(err.message, 'err');
+    showToast(err?.message || 'Ошибка вызова', 'err');
   }
 }
 
 export async function acceptVoiceCall() {
+  const chat = store.call?.chatId ? store.chats[store.call.chatId] : null;
+  if (!chat) return;
   try {
-    await callManager.acceptIncomingCall();
+    await callManager.acceptIncomingCall(chat);
   } catch (err) {
-    showToast(err.message, 'err');
+    showToast(err?.message || 'Не удалось принять звонок', 'err');
   }
 }
 
 export async function declineVoiceCall() {
   const chat = store.call?.chatId ? store.chats[store.call.chatId] : null;
-  await callManager.declineIncomingCall(chat);
+  await callManager.hangup(chat, 'declined');
+  callManager.dismissEndedModal();
 }
 
 export async function hangupVoiceCall() {
   const chat = store.call?.chatId ? store.chats[store.call.chatId] : null;
-  await callManager.hangup(chat);
+  await callManager.hangup(chat, 'hangup');
+  callManager.dismissEndedModal();
 }
 
 export function toggleCallMute() {
   triggerHaptic('tap');
   return callManager.toggleMute();
+}
+
+export function toggleCallSpeaker() {
+  triggerHaptic('tap');
+  return callManager.toggleSpeaker();
 }
 
 export function dismissCallModal() {

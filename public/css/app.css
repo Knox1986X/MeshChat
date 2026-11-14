@@ -3949,6 +3949,152 @@ html[data-frost="on"] .settings-hub-card {
   }
 }
 
+/* ─────────── MeshChat v2.0: Глобальная защита карточек от выхода контента за границы ─────────── */
+
+.studio-card,
+.policy-card,
+.settings-hub-card,
+.settings-switch-row,
+.modal-card,
+.pin-config-box,
+.kv-info-row,
+.power-status-banner,
+.active-device-banner,
+.custom-folder-manage-card,
+.account-hero-banner,
+.probe-result-pill,
+.msg-bubble,
+.chat-item {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.policy-card > div,
+.settings-switch-row > .plugin-copy,
+.power-status-banner > div,
+.custom-folder-manage-top > div:first-child,
+.account-hero-meta,
+.chat-header-peer,
+.peer-meta-col {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.policy-title,
+.policy-desc,
+.plugin-title,
+.plugin-sub,
+.modal-desc,
+.kv-info-row span,
+.kv-info-row code,
+.probe-result-pill {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.kv-info-row {
+  flex-wrap: wrap;
+}
+
+.kv-info-row code {
+  max-width: 100%;
+}
+
+.studio-actions,
+.modal-actions,
+.chip-grid,
+.wipe-confirm-row,
+.call-controls-row {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.emoji-choice-grid {
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  max-width: 100%;
+}
+
+.reaction-pack-card {
+  display: block;
+}
+
+.reaction-pack-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+@media (min-width: 560px) {
+  .reaction-pack-head {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.reaction-pack-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.reaction-pack-emojis {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.policy-card .reaction-pack-emoji-badge,
+.reaction-pack-emoji-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-size: 17px;
+  line-height: 1;
+  color: var(--text-main);
+  flex: 0 0 auto;
+}
+
+.policy-card.selected .reaction-pack-emoji-badge {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(125, 211, 252, 0.35);
+}
+
+@media (max-width: 480px) {
+  .hide-compact-mobile {
+    display: none !important;
+  }
+  .chat-header {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .chat-header-actions {
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .chat-header-actions .circle-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .power-status-banner,
+  .custom-folder-manage-top {
+    flex-wrap: wrap;
+  }
+}
+
+
 
 
 

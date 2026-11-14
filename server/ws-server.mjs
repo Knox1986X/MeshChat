@@ -197,7 +197,9 @@ export class ServerWsConnection extends EventEmitter {
       }
     });
     socket.on('error', (err) => {
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) {
+        this.emit('error', err);
+      }
       try { socket.destroy(); } catch { /* ignore */ }
     });
   }
@@ -207,18 +209,26 @@ export class ServerWsConnection extends EventEmitter {
   }
 
   sendBinary(bytes) {
-    if (this.readyState !== 1) return false;
+    if (this.readyState !== 1 || this.socket.destroyed) return false;
     if (this.bufferedAmount > this.maxBackpressureBytes) return false;
     const frame = buildWsFrame(OPCODE.BINARY, bytes, { mask: false });
-    this.socket.write(frame);
-    return true;
+    try {
+      this.socket.write(frame);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   sendText(str) {
-    if (this.readyState !== 1) return false;
+    if (this.readyState !== 1 || this.socket.destroyed) return false;
     const frame = buildWsFrame(OPCODE.TEXT, Buffer.from(String(str), 'utf8'), { mask: false });
-    this.socket.write(frame);
-    return true;
+    try {
+      this.socket.write(frame);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   close(code = 1000, reason = '') {

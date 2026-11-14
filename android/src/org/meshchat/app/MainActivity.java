@@ -1,8 +1,8 @@
-// Главный экран Android-приложения MeshChat v1.7.
+// Главный экран Android-приложения MeshChat v2.0.
 // Запускает изолированный SOCKS5-мост (127.0.0.1:27700) и собственный локальный узел (127.0.0.1:27701),
-// сбрасывает HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault),
-// управляет защитой от скриншотов FLAG_SECURE (по умолчанию ВЫКЛ), удержанием экрана, цветом системных баров,
-// сохранением экспортируемых файлов в Загрузки, локальными уведомлениями, вибрацией и жестом «Назад».
+// доставляет системные уведомления в шторку Android (heads-up + переход в чат по нажатию),
+// управляет аудиомаршрутизацией звонков (микрофон / динамик / разговорный тракт),
+// сбрасывает только HTTP-кеш ассетов при обновлении версии (сохраняя IndexedDB и AndroidKeyStore Vault).
 
 package org.meshchat.app;
 
@@ -21,10 +21,13 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.MediaStore;
@@ -47,7 +50,6 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStream;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public final class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 1001;
@@ -59,7 +61,11 @@ public final class MainActivity extends Activity {
     private static final String META_PREFS = "meshchat_meta";
     private static final String KEY_SCREENSHOT_PROTECTION = "screenshot_protection";
     private static final String KEY_KEEP_SCREEN_ON = "keep_screen_on";
-    private static final String NOTIF_CHANNEL_ID = "meshchat_e2ee_messages";
+    private static final String KEY_BG_KEEPALIVE = "bg_keepalive_enabled";
+    private static final String EXTRA_CHAT_ID = "meshchat_chat_id";
+
+    private static final String NOTIF_CHANNEL_MESSAGES = "meshchat_messages_v2";
+    private static final String NOTIF_CHANNEL_CALLS = "meshchat_calls_v2";
 
     private WebView webView;
     private MeshSocksBridge socksBridge;
@@ -69,7 +75,8 @@ public final class MainActivity extends Activity {
     private ValueCallback<Uri[]> fileUploadCallback;
     private PermissionRequest pendingWebRtcPermission;
     private volatile boolean isForeground = true;
-    private final AtomicInteger notifSeq = new AtomicInteger(2000);
+    private volatile String pendingOpenChatId = null;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -78,6 +85,7 @@ public final class MainActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(META_PREFS, MODE_PRIVATE);
         boolean secureScreen = prefs.getBoolean(KEY_SCREENSHOT_PROTECTION, false);
         boolean keepAwake = prefs.getBoolean(KEY_KEEP_SCREEN_ON, false);
+        boolean bgKeepAlive = prefs.getBoolean(KEY_BG_KEEPALIVE, true);
 
         Window window = getWindow();
         if (window != null) {
@@ -88,7 +96,8 @@ public final class MainActivity extends Activity {
             window.setNavigationBarColor(Color.parseColor("#0b0d14"));
         }
 
-        ensureNotificationChannel();
+        ensureNotificationChannels();
+        captureIntentChatTarget(getIntent());
         nativeVault = new MeshNativeVault(this);
 
         socksBridge = new MeshSocksBridge();
@@ -105,7 +114,7 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.parseColor("#0b0d14"));
         configureWebView(webView);
 
-        // При обновлении версии очищаем ТОЛЬКО HTTP-кеш файлов (IndexedDB и AndroidKeyStore не затрагиваются)
+        // При обновлении версии очищаем ТОЛЬКО HTTP-кеш файлов (IndexedDB и AndroidKeyStore сохраняются)
         int currentVerCode = getCurrentVersionCode();
         int prevVerCode = prefs.getInt("last_ver_code", -1);
         if (prevVerCode != currentVerCode) {
@@ -121,22 +130,111 @@ public final class MainActivity extends Activity {
 
         int port = localNode.getBoundPort();
         webView.loadUrl("http://127.0.0.1:" + port + "/?v=" + currentVerCode);
+
+        // Автоматический запрос разрешения на показ уведомлений в шторке Android 13+ (SDK >= 33)
+        mainHandler.postDelayed(() -> {
+            requestPostNotificationsIfNeeded(false);
+            if (bgKeepAlive) {
+                syncKeepAliveService(true);
+            }
+        }, 750);
     }
 
-    private void ensureNotificationChannel() {
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureIntentChatTarget(intent);
+        dispatchPendingChatOpenToWebView();
+    }
+
+    private void captureIntentChatTarget(Intent intent) {
+        if (intent == null) return;
+        String cid = intent.getStringExtra(EXTRA_CHAT_ID);
+        if (cid != null && !cid.trim().isEmpty()) {
+            pendingOpenChatId = cid.trim();
+            intent.removeExtra(EXTRA_CHAT_ID);
+        }
+    }
+
+    private void dispatchPendingChatOpenToWebView() {
+        final String target = pendingOpenChatId;
+        if (target == null || target.isEmpty() || webView == null) return;
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            String js = "if (window.__meshOpenChatFromNotification) { window.__meshOpenChatFromNotification("
+                    + JSONObject.quote(target) + "); }";
+            webView.evaluateJavascript(js, null);
+        });
+    }
+
+    private void requestPostNotificationsIfNeeded(boolean forcePrompt) {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                SharedPreferences prefs = getSharedPreferences(META_PREFS, MODE_PRIVATE);
+                boolean askedOnce = prefs.getBoolean("notif_perm_prompted_v2", false);
+                if (forcePrompt || !askedOnce) {
+                    prefs.edit().putBoolean("notif_perm_prompted_v2", true).apply();
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_POST_NOTIFICATIONS);
+                }
+            }
+        }
+    }
+
+    private void syncKeepAliveService(boolean enable) {
+        try {
+            Intent svc = new Intent(this, MeshKeepAliveService.class);
+            if (enable) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    startForegroundService(svc);
+                } else {
+                    startService(svc);
+                }
+            } else {
+                stopService(svc);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void ensureNotificationChannels() {
         try {
             NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
-            NotificationChannel ch = new NotificationChannel(
-                    NOTIF_CHANNEL_ID,
-                    "Сообщения и вызовы E2EE",
+
+            NotificationChannel msgCh = new NotificationChannel(
+                    NOTIF_CHANNEL_MESSAGES,
+                    "Сообщения MeshChat",
                     NotificationManager.IMPORTANCE_HIGH
             );
-            ch.setDescription("Локальные уведомления MeshChat о входящих зашифрованных пакетах");
-            ch.enableVibration(true);
-            nm.createNotificationChannel(ch);
+            msgCh.setDescription("Уведомления в шторке о новых зашифрованных сообщениях");
+            msgCh.enableVibration(true);
+            msgCh.enableLights(true);
+            msgCh.setLightColor(Color.parseColor("#6366f1"));
+            msgCh.setShowBadge(true);
+            msgCh.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+            nm.createNotificationChannel(msgCh);
+
+            NotificationChannel callCh = new NotificationChannel(
+                    NOTIF_CHANNEL_CALLS,
+                    "Входящие звонки MeshChat",
+                    NotificationManager.IMPORTANCE_HIGH
+            );
+            callCh.setDescription("Приоритетные уведомления в шторке о входящих голосовых звонках E2EE");
+            callCh.enableVibration(true);
+            callCh.setVibrationPattern(new long[]{0, 350, 200, 350, 200, 450});
+            callCh.enableLights(true);
+            callCh.setLightColor(Color.parseColor("#10b981"));
+            callCh.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            nm.createNotificationChannel(callCh);
         } catch (Exception ignored) {
         }
+    }
+
+    private static int computeNotificationIdForChat(String chatId, boolean isCall) {
+        String key = (chatId != null && !chatId.trim().isEmpty()) ? chatId.trim() : "general";
+        int hash = Math.abs(key.hashCode() % 700000);
+        return (isCall ? 800000 : 10000) + hash;
     }
 
     private void applyWindowSecureFlag(boolean enabled) {
@@ -167,12 +265,16 @@ public final class MainActivity extends Activity {
         return getSharedPreferences(META_PREFS, MODE_PRIVATE).getBoolean(KEY_KEEP_SCREEN_ON, false);
     }
 
+    private boolean isBgKeepAliveActive() {
+        return getSharedPreferences(META_PREFS, MODE_PRIVATE).getBoolean(KEY_BG_KEEPALIVE, true);
+    }
+
     private int getCurrentVersionCode() {
         try {
             PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
             return pi.versionCode;
         } catch (Exception e) {
-            return 8;
+            return 11;
         }
     }
 
@@ -211,6 +313,12 @@ public final class MainActivity extends Activity {
                     return true;
                 }
                 return false;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                mainHandler.postDelayed(MainActivity.this::dispatchPendingChatOpenToWebView, 350);
             }
         });
 
@@ -287,13 +395,33 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQ_RECORD_AUDIO && pendingWebRtcPermission != null) {
-            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                pendingWebRtcPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-            } else {
-                pendingWebRtcPermission.deny();
+        if (requestCode == REQ_RECORD_AUDIO) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (pendingWebRtcPermission != null) {
+                if (granted) {
+                    pendingWebRtcPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                } else {
+                    pendingWebRtcPermission.deny();
+                }
+                pendingWebRtcPermission = null;
             }
-            pendingWebRtcPermission = null;
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('meshchat:audio-perm',{detail:{granted:" + granted + "}}));",
+                        null
+                );
+            }
+        } else if (requestCode == REQ_POST_NOTIFICATIONS) {
+            boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (granted && isBgKeepAliveActive()) {
+                syncKeepAliveService(true);
+            }
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('meshchat:notif-perm',{detail:{granted:" + granted + "}}));",
+                        null
+                );
+            }
         }
     }
 
@@ -301,20 +429,21 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         isForeground = true;
-        try {
-            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm != null) nm.cancelAll();
-        } catch (Exception ignored) {
-        }
         if (webView != null) {
             webView.onResume();
+            webView.resumeTimers();
             webView.evaluateJavascript("window.dispatchEvent(new Event('meshchat:resume'));", null);
+            dispatchPendingChatOpenToWebView();
         }
     }
 
     @Override
     protected void onPause() {
         isForeground = false;
+        // Удерживаем JS-таймеры активными, чтобы фоновый WebSocket продолжал принимать пакеты для шторки уведомлений
+        if (webView != null) {
+            webView.resumeTimers();
+        }
         super.onPause();
     }
 
@@ -341,6 +470,14 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                am.setSpeakerphoneOn(false);
+                am.setMode(AudioManager.MODE_NORMAL);
+            }
+        } catch (Exception ignored) {
+        }
         if (webView != null) {
             webView.destroy();
             webView = null;
@@ -350,7 +487,7 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    /** Нативный мост управления узлами, автообновлением, сохранением файлов, уведомлениями и AndroidKeyStore */
+    /** Нативный мост управления узлами, шторкой уведомлений, аудио звонков, файлами и AndroidKeyStore */
     public final class AndroidJsBridge {
         @JavascriptInterface
         public String getAppInfoJson() {
@@ -365,10 +502,80 @@ public final class MainActivity extends Activity {
                 o.put("legacyInstalled", isLegacyPackageInstalled());
                 o.put("screenshotProtection", isScreenshotProtectionActive());
                 o.put("keepScreenOn", isKeepScreenOnActive());
+                o.put("bgKeepAlive", isBgKeepAliveActive());
+                o.put("notifGranted", hasNotificationPermission());
+                o.put("audioGranted", hasAudioPermission());
                 return o.toString();
             } catch (Exception e) {
                 return "{\"packageName\":\"io.meshchat.app\",\"legacyInstalled\":false,\"screenshotProtection\":false,\"keepScreenOn\":false}";
             }
+        }
+
+        @JavascriptInterface
+        public String consumePendingNotificationChatId() {
+            String cid = pendingOpenChatId;
+            pendingOpenChatId = null;
+            return cid != null ? cid : "";
+        }
+
+        @JavascriptInterface
+        public boolean hasNotificationPermission() {
+            if (Build.VERSION.SDK_INT < 33) return true;
+            return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void requestNotificationPermission() {
+            runOnUiThread(() -> requestPostNotificationsIfNeeded(true));
+        }
+
+        @JavascriptInterface
+        public boolean hasAudioPermission() {
+            return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        @JavascriptInterface
+        public void ensureAudioPermission() {
+            runOnUiThread(() -> {
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void setCallAudioMode(boolean active, boolean speakerphone) {
+            runOnUiThread(() -> {
+                try {
+                    AudioManager am = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                    if (am == null) return;
+                    if (active) {
+                        am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                        am.setSpeakerphoneOn(speakerphone);
+                        applyKeepScreenOnFlag(true);
+                    } else {
+                        am.setSpeakerphoneOn(false);
+                        am.setMode(AudioManager.MODE_NORMAL);
+                        applyKeepScreenOnFlag(isKeepScreenOnActive());
+                    }
+                } catch (Exception ignored) {
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public boolean setBackgroundKeepAlive(boolean enabled) {
+            getSharedPreferences(META_PREFS, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_BG_KEEPALIVE, enabled)
+                    .apply();
+            runOnUiThread(() -> syncKeepAliveService(enabled));
+            return enabled;
+        }
+
+        @JavascriptInterface
+        public boolean isBackgroundKeepAliveEnabled() {
+            return isBgKeepAliveActive();
         }
 
         @JavascriptInterface
@@ -417,7 +624,7 @@ public final class MainActivity extends Activity {
 
         @JavascriptInterface
         public void vibrate(int durationMs) {
-            int clamped = Math.max(5, Math.min(durationMs, 150));
+            int clamped = Math.max(5, Math.min(durationMs, 250));
             try {
                 Vibrator vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
                 if (vib != null && vib.hasVibrator()) {
@@ -471,19 +678,12 @@ public final class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void requestNotificationPermission() {
-            if (Build.VERSION.SDK_INT >= 33) {
-                runOnUiThread(() -> {
-                    if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                        requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_POST_NOTIFICATIONS);
-                    }
-                });
-            }
+        public void showLocalNotification(String title, String body) {
+            showChatNotification("general", title, body, false);
         }
 
         @JavascriptInterface
-        public void showLocalNotification(String title, String body) {
-            if (isForeground) return;
+        public void showChatNotification(String chatId, String title, String body, boolean isCall) {
             try {
                 if (Build.VERSION.SDK_INT >= 33
                         && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -491,22 +691,55 @@ public final class MainActivity extends Activity {
                 }
                 NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                 if (nm == null) return;
+
+                String safeChatId = (chatId != null && !chatId.trim().isEmpty()) ? chatId.trim() : "general";
+                int notifId = computeNotificationIdForChat(safeChatId, isCall);
+                String safeTitle = (title != null && !title.trim().isEmpty()) ? title : "MeshChat";
+                String safeBody = (body != null && !body.trim().isEmpty())
+                        ? body
+                        : (isCall ? "Входящий голосовой звонок E2EE" : "Новое зашифрованное сообщение");
+
                 Intent openIntent = new Intent(MainActivity.this, MainActivity.class);
                 openIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                openIntent.putExtra(EXTRA_CHAT_ID, safeChatId);
+
                 PendingIntent pi = PendingIntent.getActivity(
                         MainActivity.this,
-                        0,
+                        notifId,
                         openIntent,
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 );
-                Notification notif = new Notification.Builder(MainActivity.this, NOTIF_CHANNEL_ID)
-                        .setSmallIcon(android.R.drawable.stat_notify_chat)
-                        .setContentTitle(title != null ? title : "MeshChat")
-                        .setContentText(body != null ? body : "Новое зашифрованное сообщение")
+
+                String channelId = isCall ? NOTIF_CHANNEL_CALLS : NOTIF_CHANNEL_MESSAGES;
+                int smallIcon = isCall
+                        ? android.R.drawable.stat_sys_phone_call
+                        : android.R.drawable.stat_notify_chat;
+
+                Notification.Builder builder = new Notification.Builder(MainActivity.this, channelId)
+                        .setSmallIcon(smallIcon)
+                        .setContentTitle(safeTitle)
+                        .setContentText(safeBody)
+                        .setStyle(new Notification.BigTextStyle().bigText(safeBody))
                         .setContentIntent(pi)
                         .setAutoCancel(true)
-                        .build();
-                nm.notify(notifSeq.incrementAndGet(), notif);
+                        .setShowWhen(true)
+                        .setWhen(System.currentTimeMillis())
+                        .setCategory(isCall ? Notification.CATEGORY_CALL : Notification.CATEGORY_MESSAGE)
+                        .setVisibility(isCall ? Notification.VISIBILITY_PUBLIC : Notification.VISIBILITY_PRIVATE);
+
+                nm.notify(notifId, builder.build());
+            } catch (Exception ignored) {
+            }
+        }
+
+        @JavascriptInterface
+        public void cancelChatNotification(String chatId) {
+            try {
+                NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm == null) return;
+                String safeChatId = (chatId != null && !chatId.trim().isEmpty()) ? chatId.trim() : "general";
+                nm.cancel(computeNotificationIdForChat(safeChatId, false));
+                nm.cancel(computeNotificationIdForChat(safeChatId, true));
             } catch (Exception ignored) {
             }
         }

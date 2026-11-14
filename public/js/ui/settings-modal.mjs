@@ -28,6 +28,7 @@ import {
   declineVoiceCall,
   hangupVoiceCall,
   toggleCallMute,
+  toggleCallSpeaker,
   dismissCallModal,
   copyWithPrivacy,
   clearSingleChatHistory,
@@ -277,22 +278,29 @@ function CallModal({ call }) {
   const avatarUrl = chat?.peerProfile?.avatarDataUrl || '';
   const avatarColor = chat?.avatarColor || '#3B4CCA';
 
+  const modeBadge =
+    call.transportMode === 'p2p-dtls'
+      ? 'E2EE · P2P DTLS-SRTP'
+      : call.transportMode === 'relay-e2ee'
+        ? 'E2EE · AES-256-GCM AUDIO RELAY'
+        : 'E2EE СИГНАЛИНГ · DOUBLE RATCHET';
+
   const statusText =
     call.phase === 'ringing'
       ? (call.direction === 'incoming'
-        ? 'Входящий зашифрованный вызов DTLS-SRTP…'
-        : 'Шифрование сигналинга и ожидание ответа…')
+        ? 'Входящий зашифрованный голосовой вызов…'
+        : 'Вызов собеседника и ожидание ответа…')
       : call.phase === 'connecting'
-        ? 'Установка прямого медиаканала ICE / DTLS-SRTP…'
+        ? 'Согласование защищённого аудиоканала…'
         : call.phase === 'connected'
-          ? `Защищённый аудиоканал · ${formatCallDuration(call.elapsedSec)}`
+          ? `Связь установлена · ${formatCallDuration(call.elapsedSec)}`
           : (call.reason || 'Вызов завершён');
 
   return html`<div class="modal-backdrop">
     <div class="modal-card call-sheet-card" onClick=${(e) => e.stopPropagation()}>
       <div class="call-top-pill">
         <${Icon} name="shield" size=${13} />
-        <span>E2EE СИГНАЛИНГ · DTLS-SRTP ${call.relayOnly ? '· TURN RELAY' : '· P2P'}</span>
+        <span>${modeBadge}</span>
       </div>
 
       <div class=${`call-avatar-pulse ${call.phase === 'ringing' || call.phase === 'connecting' ? 'pulsing' : ''}`}>
@@ -308,12 +316,12 @@ function CallModal({ call }) {
       <h3 class="call-peer-title">${call.peerTitle}</h3>
       <div class="call-phase-label">${statusText}</div>
 
-      ${call.phase === 'connected' && html`<div class="call-mic-meter" title="Уровень вашего микрофона">
-        <div class="call-mic-fill" style=${`width:${call.muted ? 0 : Math.max(8, call.micLevel)}%`}></div>
+      ${call.phase === 'connected' && html`<div class="call-mic-meter" title="Индикатор голосового канала">
+        <div class="call-mic-fill" style=${`width:${call.muted ? 0 : Math.max(12, call.micLevel)}%`}></div>
       </div>`}
 
       ${call.dtlsSas && html`<div class="call-sas-box">
-        <span>Код сверки DTLS SAS (должен совпадать у обоих):</span>
+        <span>Код сверки ключей звонка (должен совпадать у обоих):</span>
         <code>${call.dtlsSas}</code>
       </div>`}
 
@@ -340,6 +348,15 @@ function CallModal({ call }) {
                 >
                   <${Icon} name=${call.muted ? 'micOff' : 'mic'} size=${19} />
                   <span>${call.muted ? 'Вкл. микр.' : 'Микрофон'}</span>
+                </button>
+                <button
+                  type="button"
+                  class=${`call-round-btn ${call.speaker ? 'accept' : 'neutral'}`}
+                  title="Громкая связь"
+                  onClick=${toggleCallSpeaker}
+                >
+                  <${Icon} name="volume" size=${19} />
+                  <span>${call.speaker ? 'Динамик' : 'Телефон'}</span>
                 </button>
                 <button type="button" class="call-round-btn danger" title="Завершить вызов" onClick=${hangupVoiceCall}>
                   <${Icon} name="phoneOff" size=${20} />

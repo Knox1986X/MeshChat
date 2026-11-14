@@ -2,14 +2,15 @@
 // Кеширует только неизменяемую оболочку приложения (HTML/CSS/JS/WASM) для мгновенного старта офлайн.
 // Никогда не кеширует /api/*, /downloads/* или зашифрованные вложения.
 
-const CACHE_NAME = 'meshchat-shell-v10';
+const CACHE_NAME = 'meshchat-shell-v11';
 const CORE_SHELL = [
   '/',
   '/index.html',
-  '/css/app.css?v=10',
-  '/js/app.mjs?v=10',
+  '/css/app.css?v=11',
+  '/js/app.mjs?v=11',
   '/js/ui/atmosphere-layer.mjs',
   '/js/ui/settings-sections.mjs',
+  '/js/transport/voice-relay-audio.mjs',
   '/icon.svg',
   '/manifest.webmanifest',
 ];

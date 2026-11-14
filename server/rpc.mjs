@@ -196,9 +196,9 @@ export class BlindRpcRouter {
 
       case 'webrtc.signal': {
         // Слепой эфемерный P2P-сигналинг (живёт ТОЛЬКО в RAM, на диск никогда не пишется!)
-        this.gate.enforceLimit('rtc-sig', reqCtx.clientTag, 120, 60_000);
+        this.gate.enforceLimit('rtc-sig', reqCtx.clientTag, 360, 60_000);
         const mailboxId = String(p.mailboxId || '');
-        assertPublic(body && body.byteLength >= 64 && body.byteLength <= 65536, 'Некорректный пакет сигналинга');
+        assertPublic(body && body.byteLength >= 32 && body.byteLength <= 65536, 'Некорректный пакет сигналинга');
         const recipient = this.storage.getUserByMailbox(mailboxId);
         assertPublic(recipient, 'Адресат недоступен', 404);
         assertPublic(
@@ -207,6 +207,23 @@ export class BlindRpcRouter {
           403
         );
         const onlineCount = this.pushToMailbox(mailboxId, 'webrtc.signal', { ts: Date.now() }, body);
+        return { relayed: onlineCount > 0 };
+      }
+
+      case 'voice.frame': {
+        // Слепой бинарный E2EE-ретранслятор аудиокадров для сетей с жёстким Symmetric CGNAT (4G/LTE).
+        // Пакеты шифруются сквозным ключом звонка AES-256-GCM на клиентах и никогда не сохраняются на диск.
+        this.gate.enforceLimit('voice-rt', reqCtx.clientTag, 1800, 60_000);
+        const mailboxId = String(p.mailboxId || '');
+        assertPublic(body && body.byteLength >= 36 && body.byteLength <= 16384, 'Некорректный аудиокадр');
+        const recipient = this.storage.getUserByMailbox(mailboxId);
+        assertPublic(recipient, 'Адресат недоступен', 404);
+        assertPublic(
+          verifyWriteProof(recipient.mailboxWriteToken, body, p.writeProof),
+          'Недействительный токен голосового канала',
+          403
+        );
+        const onlineCount = this.pushToMailbox(mailboxId, 'voice.frame', { ts: Date.now() }, body);
         return { relayed: onlineCount > 0 };
       }
 

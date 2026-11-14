@@ -857,6 +857,21 @@ public final class MeshLocalNode {
                 res.put("relayed", delivered > 0);
                 return res;
             }
+            case "voice.frame": {
+                String mb = p.optString("mailboxId", "");
+                String targetUid = userIdByMailbox.get(mb);
+                if (targetUid == null) throw new IllegalArgumentException("Адресат недоступен");
+                JSONObject recipient = usersById.get(targetUid);
+                if (!verifyHmacWriteProof(recipient.getString("mailboxWriteToken"), body, p.optString("writeProof", ""))) {
+                    throw new IllegalArgumentException("Недействительный токен голосового канала");
+                }
+                JSONObject evMeta = new JSONObject();
+                evMeta.put("ts", System.currentTimeMillis());
+                int delivered = pushEventToMailbox(mb, "voice.frame", evMeta, body);
+                JSONObject res = new JSONObject();
+                res.put("relayed", delivered > 0);
+                return res;
+            }
             case "mailbox.pull": {
                 requireAuth(peer);
                 List<EnvelopeItem> list = mailboxes.getOrDefault(peer.mailboxId, Collections.emptyList());

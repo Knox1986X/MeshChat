@@ -186,8 +186,13 @@ export class AuthService {
    */
   issueEphemeralTurnCredentials() {
     const iceServers = [
-      // По умолчанию клиенты могут выбрать режим relay-only для скрытия IP от собеседника в звонке
-      { urls: ['stun:stun.cloudflare.com:3478'] },
+      {
+        urls: [
+          'stun:stun.cloudflare.com:3478',
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+        ],
+      },
     ];
     if (this.turnHost && this.turnSecret) {
       const expiresAtSec = Math.floor(Date.now() / 1000) + this.turnTtlSec;

@@ -199,9 +199,9 @@ test('E2eeCallManager проводит полный цикл зашифрова�
   }
 });
 
-test('Версия v1.9.0 (build 10), 11 разделов настроек, папки чатов, энергосбережение и действия чата', async () => {
-  assert.equal(storeMod.APP_VERSION, '1.9.0');
-  assert.equal(storeMod.APP_VERSION_CODE, 10);
+test('Версия v2.0.0 (build 11), 11 разделов настроек, папки чатов, энергосбережение и действия чата', async () => {
+  assert.equal(storeMod.APP_VERSION, '2.0.0');
+  assert.equal(storeMod.APP_VERSION_CODE, 11);
   assert.equal(Object.keys(storeMod.THEME_PRESETS).length, 18);
   assert.equal(storeMod.HOLIDAY_MOOD_PACKS.length, 6);
   assert.ok(Object.keys(storeMod.BUBBLE_GRADIENTS).length >= 8);
@@ -284,7 +284,7 @@ test('Версия v1.9.0 (build 10), 11 разделов настроек, па
 test('Service Worker, атмосферный слой и Android MainActivity содержат полную реализацию', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const sw = fs.readFileSync(path.join(root, 'public/sw.js'), 'utf8');
-  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v10'"));
+  assert.ok(sw.includes("CACHE_NAME = 'meshchat-shell-v11'"));
   assert.ok(sw.includes("url.pathname.startsWith('/api/')"));
 
   const atmo = fs.readFileSync(path.join(root, 'public/js/ui/atmosphere-layer.mjs'), 'utf8');
@@ -293,12 +293,125 @@ test('Service Worker, атмосферный слой и Android MainActivity с
 
   const java = fs.readFileSync(path.join(root, 'android/src/org/meshchat/app/MainActivity.java'), 'utf8');
   assert.ok(java.includes('saveBase64Document'));
-  assert.ok(java.includes('showLocalNotification'));
+  assert.ok(java.includes('showChatNotification'));
+  assert.ok(java.includes('cancelChatNotification'));
+  assert.ok(java.includes('setCallAudioMode'));
   assert.ok(java.includes('requestNotificationPermission'));
   assert.ok(java.includes('getClipData'));
 
+  const chatViewSrc = fs.readFileSync(path.join(root, 'public/js/ui/chat-view.mjs'), 'utf8');
+  assert.ok(!chatViewSrc.includes('onceToggle'), 'Жёлтая кнопка [1] удалена из панели ввода чата');
+
   const manifest = fs.readFileSync(path.join(root, 'android/AndroidManifest.xml'), 'utf8');
   assert.ok(manifest.includes('package="io.meshchat.app"'));
-  assert.ok(manifest.includes('android:versionCode="10"'));
-  assert.ok(manifest.includes('android:versionName="1.9.0"'));
+  assert.ok(manifest.includes('android:versionCode="11"'));
+  assert.ok(manifest.includes('android:versionName="2.0.0"'));
+});
+
+test('v2.0: Кодек G.711 μ-law + AES-256-GCM аудиоретранслятор 4G CGNAT и шторка уведомлений Android', async () => {
+  const voiceMod = await import('../public/js/transport/voice-relay-audio.mjs');
+  const { E2eeCallManager } = await import('../public/js/transport/call-manager.mjs');
+
+  // 1. Проверяем точность кодирования/декодирования синусоиды 48 кГц -> 8 кГц μ-law -> Float32
+  const src48k = new Float32Array(4800);
+  for (let i = 0; i < src48k.length; i++) {
+    src48k[i] = Math.sin((2 * Math.PI * 440 * i) / 48000) * 0.7;
+  }
+  const ulaw = voiceMod.downsampleAndEncodeMuLaw(src48k, 48000);
+  assert.equal(ulaw.length, 800);
+  const decoded = voiceMod.decodeMuLawBuffer(ulaw);
+  assert.equal(decoded.length, 800);
+
+  let mse = 0;
+  for (let i = 0; i < 800; i++) {
+    const ref = Math.sin((2 * Math.PI * 440 * (6 * i + 2.5)) / 48000) * 0.7;
+    const diff = decoded[i] - ref;
+    mse += diff * diff;
+  }
+  const rmse = Math.sqrt(mse / 800);
+  assert.ok(rmse < 0.025, `Низкая ошибка квантования G.711 μ-law (RMSE=${rmse.toFixed(4)})`);
+
+  // 2. Проверяем сквозное шифрование аудиокадра AES-256-GCM и отсечение чужого callTag
+  const rawKey = crypto.getRandomValues(new Uint8Array(32));
+  const aesKey = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  const tagA = await voiceMod.deriveCallTagBytes('call_alpha');
+  const tagB = await voiceMod.deriveCallTagBytes('call_beta');
+
+  const packet = await voiceMod.encryptVoiceFrame(aesKey, tagA, ulaw);
+  assert.equal(packet.byteLength, 8 + 12 + 800 + 16);
+
+  const wrongCall = await voiceMod.decryptVoiceFrame(aesKey, tagB, packet);
+  assert.equal(wrongCall, null);
+
+  const decryptedUlaw = await voiceMod.decryptVoiceFrame(aesKey, tagA, packet);
+  assert.deepEqual(decryptedUlaw, ulaw);
+
+  // 3. Проверяем двустороннее соединение E2eeCallManager в режиме 4G CGNAT (без прямого UDP WebRTC)
+  const chatAlice = { id: 'dm:bob', kind: 'dm', peerId: 'u_bob', title: 'Bob', username: 'bob' };
+  const chatBob = { id: 'dm:alice', kind: 'dm', peerId: 'u_alice', title: 'Alice', username: 'alice' };
+
+  let aliceMgr;
+  let bobMgr;
+  aliceMgr = new E2eeCallManager({
+    getIceServers: async () => [{ urls: ['stun:stun.cloudflare.com:3478'] }],
+    getIceTransportPolicy: () => 'relay', // Строгий режим без TURN -> чистый E2EE Relay!
+    sendSignalToChat: async (_chat, sig) => {
+      await bobMgr.handleIncomingSignal(chatBob, sig);
+    },
+    onStateChange: () => {},
+    onNotice: () => {},
+  });
+  bobMgr = new E2eeCallManager({
+    getIceServers: async () => [{ urls: ['stun:stun.cloudflare.com:3478'] }],
+    getIceTransportPolicy: () => 'relay',
+    sendSignalToChat: async (_chat, sig) => {
+      await aliceMgr.handleIncomingSignal(chatAlice, sig);
+    },
+    onStateChange: () => {},
+    onNotice: () => {},
+  });
+
+  await aliceMgr.startOutgoingCall(chatAlice);
+  assert.equal(aliceMgr.state.status, 'outgoing');
+  assert.equal(bobMgr.state.status, 'incoming');
+
+  await bobMgr.acceptIncomingCall(chatBob);
+  // Дожидаемся промис-очереди сигналинга answer
+  await new Promise((r) => setTimeout(r, 40));
+
+  assert.equal(aliceMgr.state.status, 'connected');
+  assert.equal(bobMgr.state.status, 'connected');
+  assert.ok(aliceMgr.state.sasEmojis.length >= 4);
+  assert.equal(aliceMgr.state.sasEmojis, bobMgr.state.sasEmojis);
+
+  aliceMgr.toggleSpeaker();
+  assert.equal(aliceMgr.state.speaker, true);
+  aliceMgr.toggleMute();
+  assert.equal(aliceMgr.state.muted, true);
+
+  await aliceMgr.hangup(chatAlice);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(aliceMgr.state.status, 'ended');
+  assert.equal(bobMgr.state.status, 'ended');
+  aliceMgr.dismissEndedModal();
+  bobMgr.dismissEndedModal();
+  assert.equal(aliceMgr.state.status, 'idle');
+  assert.equal(bobMgr.state.status, 'idle');
+
+  // 4. Проверяем мост шторки уведомлений Android
+  const posted = [];
+  const origBridge = globalThis.MeshChatAndroid;
+  globalThis.MeshChatAndroid = {
+    hasNotificationPermission: () => true,
+    showChatNotification: (cid, title, body, isCall) => posted.push({ cid, title, body, isCall }),
+    cancelChatNotification: () => {},
+  };
+  try {
+    await storeMod.sendTestShadeNotification();
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].cid, 'echo:loopback');
+    assert.equal(posted[0].isCall, false);
+  } finally {
+    globalThis.MeshChatAndroid = origBridge;
+  }
 });

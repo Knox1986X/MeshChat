@@ -18,7 +18,7 @@ import {
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('Автообновление: /api/version отдаёт верный buildHash и SHA-256 подписанного MeshChat.apk v1.9.0', async () => {
+test('Автообновление: /api/version отдаёт верный buildHash и SHA-256 подписанного MeshChat.apk v2.0.0', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meshchat-upd-'));
   const srv = await createMessengerServer({ dataDir: tmpDir });
   const addr = await srv.listen(0, '127.0.0.1');
@@ -31,8 +31,8 @@ test('Автообновление: /api/version отдаёт верный build
 
     assert.equal(ver.ok, true);
     assert.equal(ver.app, 'MeshChat');
-    assert.equal(ver.version, '1.9.0');
-    assert.equal(ver.versionCode, 10);
+    assert.equal(ver.version, '2.0.0');
+    assert.equal(ver.versionCode, 11);
     assert.match(ver.buildHash, /^[a-f0-9]{12}$/);
     assert.equal(ver.githubRepo, 'Knox1986X/MeshChat');
 

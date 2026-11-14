@@ -1,482 +1,714 @@
-// Менеджер защищённых голосовых вызовов P2P WebRTC (DTLS-SRTP) поверх сигналинга Signal Protocol.
-// Все пакеты сигналинга (offer / answer / candidate / hangup / decline / busy) передаются строго
-// внутри конвертов Double Ratchet + Sealed Sender; сервер не знает ни факта звонка, ни участников.
-// Для защиты от MITM на медиапотоке вычисляет проверочный код DTLS SAS по обоим SDP-отпечаткам.
+// Менеджер голосовых E2EE-звонков 1-на-1 (Dual-Engine: WebRTC DTLS-SRTP + AES-256-GCM G.711 Relay)
+// Сигналинг и 256-битный ключ звонка передаются исключительно внутри сквозной сессии Double Ratchet + Sealed Sender.
+// При блокировке прямого UDP оператором мобильной связи (4G/LTE Symmetric CGNAT) или в режиме скрытия IP («relay»)
+// голос автоматически идёт через бинарный сквозной зашифрованный канал AES-256-GCM без потери соединения.
 
-import { sha256, utf8ToBytes, randomBytes, toBase64Url } from '../../../shared/crypto/primitives.mjs';
+import { randomBytes, toBase64Url, fromBase64Url } from '../../../shared/crypto/primitives.mjs';
 import { TRANSPORT_POLICY } from './transport-interface.mjs';
+import { EncryptedVoiceRelaySession } from './voice-relay-audio.mjs';
+
+const SAS_WORDS = [
+  'АЛЬФА', 'БАЗА', 'ВЕКТОР', 'ГРАНИТ', 'ЗЕНИТ', 'КВАРЦ', 'ЛИДЕР', 'МАЯК',
+  'ОРБИТА', 'ПОЛЮС', 'РУБИН', 'СЕВЕР', 'ТИТАН', 'ФОТОН', 'ШТОРМ', 'ЭФИР',
+];
 
 /**
- * Извлекает строки криптографических отпечатков сертификатов DTLS из SDP и вычисляет
- * симметричный проверочный код (SAS) для голосовой сверки между собеседниками.
+ * Вычисляет симметричный проверочный код сверки DTLS-SRTP SAS (4 слова + HEX-суффикс)
+ * из локального и удалённого SDP отпечатков сертификатов и идентификатора звонка.
  */
-export async function computeDtlsSas(localSdp = '', remoteSdp = '') {
+export async function computeDtlsSas(localSdp = '', remoteSdp = '', callId = '') {
   const extractFp = (sdp) => {
     const m = String(sdp || '').match(/a=fingerprint:([^\r\n]+)/i);
-    return m ? m[1].trim().toUpperCase() : '';
+    return m ? m[1].trim().toUpperCase() : String(sdp || '').trim();
   };
-  const fpA = extractFp(localSdp);
-  const fpB = extractFp(remoteSdp);
-  if (!fpA || !fpB) return null;
-  const ordered = [fpA, fpB].sort().join('||');
-  const digest = await sha256(utf8ToBytes(`MESHCHAT-DTLS-SAS-v1:${ordered}`));
-  const hex = Array.from(digest.slice(0, 8), (b) => b.toString(16).padStart(2, '0')).join('').toUpperCase();
-  return `${hex.slice(0, 4)} · ${hex.slice(4, 8)} · ${hex.slice(8, 12)} · ${hex.slice(12, 16)}`;
+  const f1 = extractFp(localSdp);
+  const f2 = extractFp(remoteSdp);
+  const sorted = [f1, f2].sort().join('|') + (callId ? `|${callId}` : '');
+  const bytes = new TextEncoder().encode(sorted);
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const words = [
+    SAS_WORDS[digest[0] & 15],
+    SAS_WORDS[(digest[0] >> 4) & 15],
+    SAS_WORDS[digest[1] & 15],
+    SAS_WORDS[(digest[1] >> 4) & 15],
+  ].join(' · ');
+  const hexTail = Array.from(digest.slice(2, 4))
+    .map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+    .join('');
+  return `${words} [${hexTail}]`;
+}
+
+function hasTurnServer(iceServers) {
+  if (!Array.isArray(iceServers)) return false;
+  return iceServers.some((srv) => {
+    const urls = Array.isArray(srv?.urls) ? srv.urls : [srv?.urls];
+    return urls.some((u) => typeof u === 'string' && /^turns?:/i.test(u));
+  });
+}
+
+async function ensureAndroidMicPermission() {
+  const bridge = globalThis.window?.MeshChatAndroid;
+  if (!bridge || typeof bridge.hasAudioPermission !== 'function') return;
+  try {
+    if (bridge.hasAudioPermission()) return;
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        globalThis.window?.removeEventListener?.('meshchat:audio-perm', done);
+        resolve();
+      };
+      globalThis.window?.addEventListener?.('meshchat:audio-perm', done, { once: true });
+      bridge.ensureAudioPermission?.();
+      const t = setTimeout(done, 6500);
+      t.unref?.();
+    });
+  } catch {
+    // Продолжаем стандартный запрос getUserMedia
+  }
+}
+
+async function waitInitialIceGathering(pc, timeoutMs = 850) {
+  if (!pc || !pc.iceGatheringState || pc.iceGatheringState === 'complete') return;
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      pc.removeEventListener?.('icegatheringstatechange', onState);
+      resolve();
+    };
+    const onState = () => {
+      if (pc.iceGatheringState === 'complete') finish();
+    };
+    if (typeof pc.addEventListener === 'function') {
+      pc.addEventListener('icegatheringstatechange', onState);
+    } else {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(finish, timeoutMs);
+    timer.unref?.();
+  });
 }
 
 export class E2eeCallManager {
-  /**
-   * @param {object} deps
-   * @param {(chat: object, payload: object) => Promise<void>} deps.sendSignalToChat
-   * @param {() => void} deps.onStateChange
-   * @param {(kind: string) => void} [deps.onRingTick]
-   * @param {typeof RTCPeerConnection} [deps.RTCPeerConnectionImpl]
-   * @param {() => Promise<MediaStream>} [deps.getUserAudioStream]
-   */
-  constructor(deps = {}) {
-    this.sendSignalToChat = deps.sendSignalToChat;
-    this.onStateChange = deps.onStateChange || (() => {});
-    this.onRingTick = deps.onRingTick || null;
-    this._PeerConn = deps.RTCPeerConnectionImpl || globalThis.RTCPeerConnection;
-    this._getAudio = deps.getUserAudioStream || (() => this._defaultGetAudioStream());
+  constructor({
+    getIceServers = async () => [{ urls: ['stun:stun.cloudflare.com:3478'] }],
+    getIceTransportPolicy = () => 'all',
+    sendSignalToChat = async () => {},
+    sendVoiceFrameToChat = async () => {},
+    onStateChange = () => {},
+    onNotice = () => {},
+  } = {}) {
+    this.getIceServers = getIceServers;
+    this.getIceTransportPolicy = getIceTransportPolicy;
+    this.sendSignalToChat = sendSignalToChat;
+    this.sendVoiceFrameToChat = sendVoiceFrameToChat;
+    this.onStateChange = onStateChange;
+    this.onNotice = onNotice;
+
+    this.pc = null;
+    this.localStream = null;
+    this.remoteStream = null;
+    this.remoteAudioEl = null;
+    this.pendingOfferSignal = null;
+    this.pendingCandidates = [];
+    this.earlyCandidatesByCallId = new Map();
+    this.durationTimer = null;
+    this.ringTimeout = null;
+    this.relaySession = null;
+    this.callKeyBytes = null;
+    this.activeChat = null;
+    this._signalChain = Promise.resolve();
 
     this.state = this._emptyState();
-    this._pc = null;
-    this._localStream = null;
-    this._remoteAudioEl = null;
-    this._pendingOfferSdp = null;
-    this._queuedCandidates = [];
-    this._durationTimer = null;
-    this._ringTimer = null;
-    this._levelTimer = null;
-    this._audioCtx = null;
   }
 
   _emptyState() {
     return {
       active: false,
-      callId: '',
-      chatId: '',
-      peerId: '',
+      status: 'idle', // 'idle' | 'outgoing' | 'incoming' | 'connecting' | 'connected' | 'ended'
+      phase: 'idle',  // 'idle' | 'ringing' | 'connecting' | 'connected' | 'ended'
+      direction: 'outgoing',
+      callId: null,
+      chatId: null,
+      peerName: '',
       peerTitle: '',
-      direction: 'outgoing', // 'outgoing' | 'incoming'
-      phase: 'idle',         // 'idle' | 'ringing' | 'connecting' | 'connected' | 'ended'
-      reason: '',
       muted: false,
+      speaker: false,
       startedAt: 0,
+      durationSec: 0,
       elapsedSec: 0,
-      dtlsSas: null,
-      micLevel: 0,
-      relayOnly: false,
+      sasEmojis: '',
+      dtlsSas: '',
+      icePolicy: 'all',
+      transportMode: 'negotiating', // 'negotiating' | 'p2p-dtls' | 'relay-e2ee'
+      micAvailable: true,
+      reason: '',
     };
   }
 
-  async _defaultGetAudioStream() {
-    if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
-      throw new Error('Доступ к микрофону (getUserMedia) не поддерживается в текущем окружении');
-    }
-    return globalThis.navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: false,
-    });
+  _setStatus(status, extra = {}) {
+    const phase =
+      status === 'outgoing' || status === 'incoming'
+        ? 'ringing'
+        : status;
+    const active = status !== 'idle';
+    Object.assign(this.state, extra, { status, phase, active });
+    this.onStateChange({ ...this.state });
   }
 
-  _ensureRemoteAudioElement(remoteStream) {
-    if (typeof document === 'undefined') return;
-    if (!this._remoteAudioEl) {
-      this._remoteAudioEl = document.createElement('audio');
-      this._remoteAudioEl.autoplay = true;
-      this._remoteAudioEl.playsInline = true;
-      this._remoteAudioEl.style.display = 'none';
-      document.body.appendChild(this._remoteAudioEl);
-    }
-    this._remoteAudioEl.srcObject = remoteStream;
-    this._remoteAudioEl.play?.().catch(() => {});
+  _emit() {
+    this.onStateChange({ ...this.state });
   }
 
-  _startLevelMeter(stream) {
-    if (typeof window === 'undefined') return;
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx || !stream?.getAudioTracks?.().length) return;
+  _enqueueSignal(chat, signalPayload) {
+    this._signalChain = this._signalChain
+      .then(() => this.sendSignalToChat(chat, signalPayload))
+      .catch(() => {});
+    return this._signalChain;
+  }
+
+  _setAndroidCallAudio(active, speaker = false) {
     try {
-      this._audioCtx = new Ctx();
-      const src = this._audioCtx.createMediaStreamSource(stream);
-      const analyser = this._audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      src.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      clearInterval(this._levelTimer);
-      this._levelTimer = setInterval(() => {
-        if (this.state.muted || !this.state.active) {
-          if (this.state.micLevel !== 0) {
-            this.state.micLevel = 0;
-            this.onStateChange();
-          }
-          return;
-        }
-        analyser.getByteFrequencyData(data);
-        let sum = 0;
-        for (let i = 0; i < data.length; i++) sum += data[i];
-        const avg = Math.min(100, Math.round((sum / data.length) * 1.4));
-        if (Math.abs(avg - this.state.micLevel) >= 6) {
-          this.state.micLevel = avg;
-          this.onStateChange();
-        }
-      }, 180);
-      this._levelTimer?.unref?.();
-    } catch { /* ignore */ }
+      globalThis.window?.MeshChatAndroid?.setCallAudioMode?.(Boolean(active), Boolean(speaker));
+    } catch {}
   }
 
-  _startRingLoop() {
-    this._stopRingLoop();
-    if (this.onRingTick) this.onRingTick();
-    this._ringTimer = setInterval(() => {
-      if (this.state.phase === 'ringing' && this.onRingTick) {
-        this.onRingTick();
+  _cancelAndroidCallNotification(chatId) {
+    try {
+      if (chatId) {
+        globalThis.window?.MeshChatAndroid?.cancelChatNotification?.(chatId);
       }
-    }, 2400);
-    this._ringTimer?.unref?.();
+    } catch {}
   }
 
-  _stopRingLoop() {
-    clearInterval(this._ringTimer);
-    this._ringTimer = null;
-  }
-
-  _markConnected() {
-    if (this.state.phase === 'connected') return;
-    this._stopRingLoop();
-    this.state.phase = 'connected';
-    this.state.startedAt = Date.now();
-    this.state.elapsedSec = 0;
-    clearInterval(this._durationTimer);
-    this._durationTimer = setInterval(() => {
-      if (this.state.phase === 'connected') {
-        this.state.elapsedSec = Math.max(0, Math.floor((Date.now() - this.state.startedAt) / 1000));
-        this.onStateChange();
-      }
-    }, 1000);
-    this._durationTimer?.unref?.();
-    this.onStateChange();
-  }
-
-  _createPeerConnection(chat, callId, iceServers, iceTransportPolicy) {
-    if (!this._PeerConn) {
-      throw new Error('WebRTC RTCPeerConnection недоступен в этом окружении');
+  async _acquireMicrophone() {
+    await ensureAndroidMicPermission();
+    if (!globalThis.navigator?.mediaDevices?.getUserMedia) {
+      return null;
     }
-    const relayOnly = iceTransportPolicy === 'relay';
-    const pc = new this._PeerConn({
-      iceServers: iceServers || [],
-      iceTransportPolicy: relayOnly ? 'relay' : 'all',
+    try {
+      return await globalThis.navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: 1,
+        },
+        video: false,
+      });
+    } catch {
+      try {
+        return await globalThis.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  async _startEncryptedRelayAudio(chat) {
+    if (!this.callKeyBytes || !this.state.callId) return;
+    if (this.relaySession) {
+      this.relaySession.stop();
+      this.relaySession = null;
+    }
+    const session = new EncryptedVoiceRelaySession({
+      callId: this.state.callId,
+      rawKey32: this.callKeyBytes,
+      localStream: this.localStream,
+      onSendFrame: async (packetBytes) => {
+        if (this.state.status !== 'connected' && this.state.status !== 'connecting') return;
+        await this.sendVoiceFrameToChat(chat, packetBytes);
+      },
     });
+    session.setMuted(this.state.muted);
+    await session.start();
+    this.relaySession = session;
+    if (this.state.transportMode !== 'p2p-dtls') {
+      this.state.transportMode = 'relay-e2ee';
+      this._emit();
+    }
+  }
+
+  async _markCallConnected(localSdp = '', remoteSdp = '') {
+    if (this.ringTimeout) {
+      clearTimeout(this.ringTimeout);
+      this.ringTimeout = null;
+    }
+    const wasConnected = this.state.status === 'connected';
+    const sas = await computeDtlsSas(localSdp, remoteSdp);
+    if (!wasConnected) {
+      this.state.startedAt = Date.now();
+      this._startDurationClock();
+    }
+    this._setStatus('connected', {
+      sasEmojis: sas,
+      dtlsSas: sas,
+    });
+  }
+
+  async _createPeerConnection(chat, callId, overrideIceServers = null, overrideIcePolicy = null) {
+    const requestedPolicy = (overrideIcePolicy || this.getIceTransportPolicy()) === 'relay' ? 'relay' : 'all';
+    this.state.icePolicy = requestedPolicy;
+
+    const iceServers = overrideIceServers || (await this.getIceServers());
+    // Если включён режим скрытия IP («relay») и нет внешнего TURN-сервера,
+    // мы не открываем прямой UDP WebRTC и ведём звонок через слепой E2EE-ретранслятор AES-256-GCM!
+    if (requestedPolicy === 'relay' && !hasTurnServer(iceServers)) {
+      return null;
+    }
+    if (typeof RTCPeerConnection === 'undefined') {
+      return null;
+    }
+
+    const pc = new RTCPeerConnection({
+      iceServers,
+      iceTransportPolicy: requestedPolicy,
+    });
+
+    if (typeof MediaStream !== 'undefined') {
+      this.remoteStream = new MediaStream();
+    }
+    if (typeof Audio !== 'undefined') {
+      this.remoteAudioEl = new Audio();
+      this.remoteAudioEl.autoplay = true;
+      this.remoteAudioEl.playsInline = true;
+      if (this.remoteStream) {
+        this.remoteAudioEl.srcObject = this.remoteStream;
+      }
+    }
+
+    pc.ontrack = (ev) => {
+      if (this.remoteStream) {
+        if (ev.streams && ev.streams[0]) {
+          for (const track of ev.streams[0].getTracks()) {
+            this.remoteStream.addTrack?.(track);
+          }
+        } else if (ev.track) {
+          this.remoteStream.addTrack?.(ev.track);
+        }
+      }
+      this.remoteAudioEl?.play?.().catch(() => {});
+    };
 
     pc.onicecandidate = (ev) => {
-      if (ev?.candidate && this.state.callId === callId) {
-        this.sendSignalToChat(chat, {
+      if (ev.candidate && this.state.callId === callId) {
+        this._enqueueSignal(chat, {
           type: 'call-signal',
           callId,
           action: 'candidate',
           candidate: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate,
-        }).catch(() => {});
+          sentAt: Date.now(),
+        });
       }
     };
 
-    pc.ontrack = (ev) => {
-      const remoteStream = ev?.streams?.[0];
-      if (remoteStream) {
-        this._ensureRemoteAudioElement(remoteStream);
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      const st = pc.connectionState;
-      if (st === 'connected') {
-        this._markConnected();
-      } else if (st === 'failed' || st === 'disconnected' || st === 'closed') {
-        if (this.state.active && this.state.callId === callId && st === 'failed') {
-          this._teardown('Обрыв медиапотока ICE/DTLS');
+    const syncP2pState = async () => {
+      if (this.pc !== pc) return;
+      const st = pc.connectionState || pc.iceConnectionState;
+      const iceSt = pc.iceConnectionState;
+      if (st === 'connected' || iceSt === 'connected' || iceSt === 'completed') {
+        this.state.transportMode = 'p2p-dtls';
+        if (this.relaySession) {
+          this.relaySession.setSuppressedByP2p(true);
+        }
+        this.remoteAudioEl?.play?.().catch(() => {});
+        await this._markCallConnected(
+          pc.localDescription?.sdp || '',
+          pc.remoteDescription?.sdp || ''
+        );
+      } else if (st === 'disconnected' || st === 'failed' || iceSt === 'disconnected' || iceSt === 'failed') {
+        if (this.relaySession && this.state.status === 'connected') {
+          this.relaySession.setSuppressedByP2p(false);
+          this.state.transportMode = 'relay-e2ee';
+          this._emit();
         }
       }
     };
 
-    pc.oniceconnectionstatechange = () => {
-      const ist = pc.iceConnectionState;
-      if (ist === 'connected' || ist === 'completed') {
-        this._markConnected();
-      }
-    };
+    pc.onconnectionstatechange = syncP2pState;
+    pc.oniceconnectionstatechange = syncP2pState;
 
     return pc;
   }
 
-  /** Запускает исходящий E2EE P2P аудиовызов */
-  async startOutgoingCall({ chat, iceServers = [], iceTransportPolicy = 'all', transportPolicy = 'auto' }) {
-    if (!chat || chat.kind !== 'dm') {
-      throw new Error('Голосовые вызовы доступны только для прямых E2EE-контактов');
-    }
-    if (transportPolicy === TRANSPORT_POLICY.TOR_ONLY || transportPolicy === TRANSPORT_POLICY.I2P_ONLY) {
-      throw new Error('В строгом режиме «Только Tor / I2P» прямой медиапоток WebRTC заблокирован для защиты IP');
-    }
-    if (this.state.active && this.state.phase !== 'ended') {
-      throw new Error('Другой голосовой вызов уже активен');
+  /** Инициирует исходящий звонок собеседнику (поддерживает как startOutgoingCall(chat), так и объект опций) */
+  async startOutgoingCall(chatOrOpts) {
+    const isOpts = chatOrOpts && typeof chatOrOpts === 'object' && 'chat' in chatOrOpts;
+    const chat = isOpts ? chatOrOpts.chat : chatOrOpts;
+    const transportPolicy = isOpts ? chatOrOpts.transportPolicy : null;
+    const overrideIceServers = isOpts ? chatOrOpts.iceServers : null;
+    const overrideIcePolicy = isOpts ? chatOrOpts.iceTransportPolicy : null;
+
+    if (
+      transportPolicy === TRANSPORT_POLICY.TOR_ONLY ||
+      transportPolicy === TRANSPORT_POLICY.I2P_ONLY
+    ) {
+      throw new Error('Голосовые вызовы отключены в строгом режиме «Только Tor / I2P» для защиты IP');
     }
 
-    this._cleanupMediaOnly();
-    const callId = toBase64Url(randomBytes(9));
+    if (!chat || chat.kind === 'room') {
+      this.onNotice('Звонки доступны в личных E2EE-диалогах', 'warn');
+      return;
+    }
+    if (this.state.status !== 'idle' && this.state.status !== 'ended') {
+      this.onNotice('Уже выполняется другой звонок', 'warn');
+      return;
+    }
+
+    const callId = `call_${toBase64Url(randomBytes(12))}`;
+    this.callKeyBytes = randomBytes(32);
+    this.activeChat = chat;
+    const peerLabel = chat.title || chat.username || 'Собеседник';
+
     this.state = {
       ...this._emptyState(),
-      active: true,
       callId,
       chatId: chat.id,
-      peerId: chat.peerId,
-      peerTitle: chat.peerProfile?.displayName || chat.title,
       direction: 'outgoing',
-      phase: 'ringing',
-      relayOnly: iceTransportPolicy === 'relay',
+      peerName: peerLabel,
+      peerTitle: peerLabel,
     };
-    this.onStateChange();
+    this._setStatus('outgoing');
+    this._setAndroidCallAudio(true, false);
 
     try {
-      const stream = await this._getAudio();
-      this._localStream = stream;
-      this._startLevelMeter(stream);
+      this.localStream = await this._acquireMicrophone();
+      this.state.micAvailable = Boolean(this.localStream);
 
-      const pc = this._createPeerConnection(chat, callId, iceServers, iceTransportPolicy);
-      this._pc = pc;
-      for (const track of stream.getTracks?.() || []) {
-        pc.addTrack(track, stream);
+      this.pc = await this._createPeerConnection(chat, callId, overrideIceServers, overrideIcePolicy);
+      let offerSdp = '';
+
+      if (this.pc) {
+        if (this.localStream) {
+          for (const track of this.localStream.getTracks()) {
+            this.pc.addTrack(track, this.localStream);
+          }
+        } else {
+          this.pc.addTransceiver?.('audio', { direction: 'recvonly' });
+        }
+        const offer = await this.pc.createOffer({ offerToReceiveAudio: true });
+        await this.pc.setLocalDescription(offer);
+        await waitInitialIceGathering(this.pc, 850);
+        offerSdp = this.pc.localDescription?.sdp || offer.sdp || '';
       }
 
-      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
-      await pc.setLocalDescription(offer);
-
-      await this.sendSignalToChat(chat, {
+      await this._enqueueSignal(chat, {
         type: 'call-signal',
         callId,
         action: 'offer',
-        sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
+        sdp: offerSdp,
+        callKeyB64: toBase64Url(this.callKeyBytes),
+        sentAt: Date.now(),
       });
+
+      this.ringTimeout = setTimeout(() => {
+        if (this.state.status === 'outgoing' && this.state.callId === callId) {
+          this.hangup(chat, 'no-answer');
+          this.onNotice('Собеседник не ответил на вызов', 'info');
+        }
+      }, 45_000);
+      this.ringTimeout.unref?.();
     } catch (err) {
-      this._teardown(err.message || 'Ошибка инициализации микрофона');
-      throw err;
+      this._resetToIdle();
+      this.onNotice(err?.message || 'Не удалось начать голосовой вызов', 'error');
     }
   }
 
-  /** Обрабатывает входящий зашифрованный пакет call-signal от собеседника */
-  async handleIncomingSignal(chat, payload, { getIceServers, iceTransportPolicy = 'all', transportPolicy = 'auto' } = {}) {
-    const { callId, action, sdp, candidate } = payload || {};
-    if (!callId || !action || !chat) return;
+  /** Принимает входящий звонок */
+  async acceptIncomingCall(chatArg = null) {
+    const chat = chatArg || this.activeChat;
+    if (this.state.status !== 'incoming' || !this.pendingOfferSignal || !chat) return;
+    const { callId, sdp, callKeyB64 } = this.pendingOfferSignal;
+    this.activeChat = chat;
+    this._cancelAndroidCallNotification(chat.id);
+    this._setAndroidCallAudio(true, this.state.speaker);
+
+    if (callKeyB64) {
+      try {
+        this.callKeyBytes = fromBase64Url(callKeyB64);
+      } catch {
+        this.callKeyBytes = null;
+      }
+    }
+    if (!this.callKeyBytes || this.callKeyBytes.byteLength !== 32) {
+      this.callKeyBytes = randomBytes(32);
+    }
+
+    this._setStatus('connecting');
+
+    try {
+      this.localStream = await this._acquireMicrophone();
+      this.state.micAvailable = Boolean(this.localStream);
+
+      this.pc = await this._createPeerConnection(chat, callId);
+      let answerSdp = '';
+
+      if (this.pc && sdp) {
+        if (this.localStream) {
+          for (const track of this.localStream.getTracks()) {
+            this.pc.addTrack(track, this.localStream);
+          }
+        } else {
+          this.pc.addTransceiver?.('audio', { direction: 'recvonly' });
+        }
+        await this.pc.setRemoteDescription({ type: 'offer', sdp });
+        await this._flushPendingCandidates();
+
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        await waitInitialIceGathering(this.pc, 850);
+        answerSdp = this.pc.localDescription?.sdp || answer.sdp || '';
+      }
+
+      // Запускаем шифрованный голосовой канал сразу при ответе — связь работает мгновенно даже на 4G CGNAT!
+      await this._startEncryptedRelayAudio(chat);
+
+      await this._enqueueSignal(chat, {
+        type: 'call-signal',
+        callId,
+        action: 'answer',
+        sdp: answerSdp,
+        callKeyB64: toBase64Url(this.callKeyBytes),
+        sentAt: Date.now(),
+      });
+
+      await this._markCallConnected(answerSdp, sdp || '');
+    } catch (err) {
+      this._resetToIdle();
+      this.onNotice(err?.message || 'Не удалось принять звонок', 'error');
+    }
+  }
+
+  async declineIncomingCall(chat = null) {
+    return this.hangup(chat || this.activeChat, 'declined');
+  }
+
+  /** Отклоняет или завершает текущий звонок */
+  async hangup(chat = null, reason = 'hangup') {
+    const activeCallId = this.state.callId;
+    const targetChat = chat || this.activeChat;
+    const targetChatId = targetChat?.id || this.state.chatId;
+    this._cancelAndroidCallNotification(targetChatId);
+    this._releaseMediaResources();
+    this._setStatus('ended', { reason: 'Вызов завершён' });
+    if (activeCallId && targetChat) {
+      await this._enqueueSignal(targetChat, {
+        type: 'call-signal',
+        callId: activeCallId,
+        action: 'hangup',
+        reason,
+        sentAt: Date.now(),
+      });
+    }
+  }
+
+  dismissEndedModal() {
+    this._resetToIdle();
+  }
+
+  toggleMute() {
+    if (!this.state.callId) return false;
+    const nextMuted = !this.state.muted;
+    if (this.localStream) {
+      for (const track of this.localStream.getAudioTracks()) {
+        track.enabled = !nextMuted;
+      }
+    }
+    if (this.relaySession) {
+      this.relaySession.setMuted(nextMuted);
+    }
+    this.state.muted = nextMuted;
+    this._emit();
+    return nextMuted;
+  }
+
+  toggleSpeaker() {
+    if (!this.state.callId) return false;
+    const nextSpeaker = !this.state.speaker;
+    this.state.speaker = nextSpeaker;
+    this._setAndroidCallAudio(true, nextSpeaker);
+    this._emit();
+    return nextSpeaker;
+  }
+
+  /** Обрабатывает входящий бинарный зашифрованный голосовой кадр AES-256-GCM */
+  async handleIncomingVoiceFrame(packetBytes) {
+    if (!this.relaySession) return false;
+    return this.relaySession.handleIncomingPacket(packetBytes);
+  }
+
+  /** Обрабатывает входящий расшифрованный пакет сигналинга из Double Ratchet */
+  async handleIncomingSignal(chat, payload) {
+    if (!payload || !payload.callId) return;
+    const { callId, action } = payload;
+
+    if (payload.sentAt && Math.abs(Date.now() - Number(payload.sentAt)) > 60_000 && action === 'offer') {
+      return;
+    }
 
     if (action === 'offer') {
-      if (transportPolicy === TRANSPORT_POLICY.TOR_ONLY || transportPolicy === TRANSPORT_POLICY.I2P_ONLY) {
-        await this.sendSignalToChat(chat, { type: 'call-signal', callId, action: 'decline' }).catch(() => {});
-        return;
-      }
-      if (this.state.active && this.state.phase !== 'ended' && this.state.callId !== callId) {
-        await this.sendSignalToChat(chat, { type: 'call-signal', callId, action: 'busy' }).catch(() => {});
+      if (this.state.status !== 'idle' && this.state.status !== 'ended') {
+        await this._enqueueSignal(chat, {
+          type: 'call-signal',
+          callId,
+          action: 'hangup',
+          reason: 'busy',
+          sentAt: Date.now(),
+        });
         return;
       }
 
-      this._cleanupMediaOnly();
-      this._pendingOfferSdp = sdp;
-      this._queuedCandidates = [];
-      this._incomingCfg = { chat, getIceServers, iceTransportPolicy };
+      const early = this.earlyCandidatesByCallId.get(callId) || [];
+      this.earlyCandidatesByCallId.delete(callId);
+      this.pendingOfferSignal = payload;
+      this.pendingCandidates = [...early];
+      this.activeChat = chat;
+      const peerLabel = chat?.title || chat?.username || 'Собеседник';
 
       this.state = {
         ...this._emptyState(),
-        active: true,
         callId,
-        chatId: chat.id,
-        peerId: chat.peerId,
-        peerTitle: chat.peerProfile?.displayName || chat.title,
+        chatId: chat?.id || null,
         direction: 'incoming',
-        phase: 'ringing',
-        relayOnly: iceTransportPolicy === 'relay',
+        peerName: peerLabel,
+        peerTitle: peerLabel,
       };
-      this._startRingLoop();
-      this.onStateChange();
+      this._setStatus('incoming');
+
+      this.ringTimeout = setTimeout(() => {
+        if (this.state.status === 'incoming' && this.state.callId === callId) {
+          this._cancelAndroidCallNotification(chat?.id);
+          this._resetToIdle();
+        }
+      }, 45_000);
+      this.ringTimeout.unref?.();
+      return;
+    }
+
+    if (action === 'candidate' && payload.candidate) {
+      if (this.state.callId !== callId) {
+        const list = this.earlyCandidatesByCallId.get(callId) || [];
+        if (list.length < 32) {
+          list.push(payload.candidate);
+          this.earlyCandidatesByCallId.set(callId, list);
+        }
+        return;
+      }
+      if (this.pc && this.pc.remoteDescription) {
+        try {
+          await this.pc.addIceCandidate(payload.candidate);
+        } catch {}
+      } else {
+        this.pendingCandidates.push(payload.candidate);
+      }
       return;
     }
 
     if (this.state.callId !== callId) return;
 
-    if (action === 'answer' && this._pc && sdp) {
-      this.state.phase = 'connecting';
-      this.onStateChange();
-      await this._pc.setRemoteDescription(sdp);
-      await this._flushQueuedCandidates();
-      this.state.dtlsSas = await computeDtlsSas(this._pc.localDescription?.sdp, sdp.sdp);
-      // Если в тестовом или локальном окружении ICE уже готов, переводим в connected
-      if (
-        this._pc.connectionState === 'connected' ||
-        this._pc.iceConnectionState === 'connected' ||
-        this._pc.iceConnectionState === 'completed'
-      ) {
-        this._markConnected();
-      } else {
-        this.onStateChange();
+    if (action === 'answer') {
+      if (payload.callKeyB64 && (!this.callKeyBytes || this.callKeyBytes.byteLength !== 32)) {
+        try {
+          this.callKeyBytes = fromBase64Url(payload.callKeyB64);
+        } catch {}
       }
-      return;
-    }
-
-    if (action === 'candidate' && candidate) {
-      if (this._pc && this._pc.remoteDescription) {
-        await this._pc.addIceCandidate(candidate).catch(() => {});
-      } else {
-        this._queuedCandidates.push(candidate);
+      if (this.pc && payload.sdp) {
+        try {
+          await this.pc.setRemoteDescription({ type: 'answer', sdp: payload.sdp });
+          await this._flushPendingCandidates();
+        } catch {}
       }
+      await this._startEncryptedRelayAudio(this.activeChat || chat);
+      await this._markCallConnected(
+        this.pc?.localDescription?.sdp || '',
+        payload.sdp || ''
+      );
       return;
     }
 
     if (action === 'hangup') {
-      this._teardown('Вызов завершён собеседником');
-    } else if (action === 'decline') {
-      this._teardown('Собеседник отклонил вызов');
-    } else if (action === 'busy') {
-      this._teardown('Линия собеседника занята');
-    }
-  }
-
-  /** Принимает входящий E2EE аудиовызов */
-  async acceptIncomingCall() {
-    if (!this.state.active || this.state.direction !== 'incoming' || !this._pendingOfferSdp) return;
-    const { chat, getIceServers, iceTransportPolicy } = this._incomingCfg || {};
-    const callId = this.state.callId;
-    this._stopRingLoop();
-    this.state.phase = 'connecting';
-    this.onStateChange();
-
-    try {
-      const [stream, iceServers] = await Promise.all([
-        this._getAudio(),
-        getIceServers ? getIceServers() : Promise.resolve([]),
-      ]);
-      this._localStream = stream;
-      this._startLevelMeter(stream);
-
-      const pc = this._createPeerConnection(chat, callId, iceServers, iceTransportPolicy);
-      this._pc = pc;
-      for (const track of stream.getTracks?.() || []) {
-        pc.addTrack(track, stream);
-      }
-
-      await pc.setRemoteDescription(this._pendingOfferSdp);
-      await this._flushQueuedCandidates();
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      this.state.dtlsSas = await computeDtlsSas(pc.localDescription?.sdp, this._pendingOfferSdp.sdp);
-
-      await this.sendSignalToChat(chat, {
-        type: 'call-signal',
-        callId,
-        action: 'answer',
-        sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp },
+      const reason = payload.reason;
+      this._cancelAndroidCallNotification(chat?.id || this.state.chatId);
+      this._releaseMediaResources();
+      this._setStatus('ended', {
+        reason: reason === 'busy' ? 'Линия собеседника занята' : 'Вызов завершён',
       });
-
-      if (
-        pc.connectionState === 'connected' ||
-        pc.iceConnectionState === 'connected' ||
-        pc.iceConnectionState === 'completed'
-      ) {
-        this._markConnected();
+      if (reason === 'busy') {
+        this.onNotice('Линия собеседника занята', 'info');
       } else {
-        this.onStateChange();
+        this.onNotice('Звонок завершён', 'info');
       }
-    } catch (err) {
-      this._teardown(err.message || 'Не удалось принять вызов');
-      throw err;
     }
   }
 
-  async declineIncomingCall(chat) {
-    if (!this.state.active) return;
-    const callId = this.state.callId;
-    if (chat && callId) {
-      this.sendSignalToChat(chat, { type: 'call-signal', callId, action: 'decline' }).catch(() => {});
+  async _flushPendingCandidates() {
+    if (!this.pc || !this.pc.remoteDescription) return;
+    const list = this.pendingCandidates.splice(0);
+    for (const c of list) {
+      try {
+        await this.pc.addIceCandidate(c);
+      } catch {}
     }
-    this._teardown('Вызов отклонён');
   }
 
-  async hangup(chat) {
-    if (!this.state.active) return;
-    const callId = this.state.callId;
-    if (chat && callId && this.state.phase !== 'ended') {
-      this.sendSignalToChat(chat, { type: 'call-signal', callId, action: 'hangup' }).catch(() => {});
-    }
-    this._teardown('Вызов завершён');
+  _startDurationClock() {
+    if (this.durationTimer) clearInterval(this.durationTimer);
+    this.durationTimer = setInterval(() => {
+      if (this.state.status === 'connected' && this.state.startedAt) {
+        const sec = Math.floor((Date.now() - this.state.startedAt) / 1000);
+        this.state.durationSec = sec;
+        this.state.elapsedSec = sec;
+        this._emit();
+      }
+    }, 1000);
+    this.durationTimer.unref?.();
   }
 
-  toggleMute() {
-    if (!this.state.active) return false;
-    this.state.muted = !this.state.muted;
-    for (const t of this._localStream?.getAudioTracks?.() || []) {
-      t.enabled = !this.state.muted;
+  _releaseMediaResources() {
+    if (this.durationTimer) {
+      clearInterval(this.durationTimer);
+      this.durationTimer = null;
     }
-    this.onStateChange();
-    return this.state.muted;
+    if (this.ringTimeout) {
+      clearTimeout(this.ringTimeout);
+      this.ringTimeout = null;
+    }
+    if (this.relaySession) {
+      this.relaySession.stop();
+      this.relaySession = null;
+    }
+    if (this.localStream) {
+      for (const t of this.localStream.getTracks()) {
+        try { t.stop(); } catch {}
+      }
+      this.localStream = null;
+    }
+    if (this.pc) {
+      try { this.pc.close(); } catch {}
+      this.pc = null;
+    }
+    if (this.remoteAudioEl) {
+      try {
+        this.remoteAudioEl.pause();
+        this.remoteAudioEl.srcObject = null;
+      } catch {}
+      this.remoteAudioEl = null;
+    }
+    this.remoteStream = null;
+    this.pendingOfferSignal = null;
+    this.pendingCandidates = [];
+    this.callKeyBytes = null;
+    this._setAndroidCallAudio(false, false);
   }
 
-  dismissEndedModal() {
-    this._cleanupMediaOnly();
+  _resetToIdle() {
+    this._releaseMediaResources();
+    this.activeChat = null;
     this.state = this._emptyState();
-    this.onStateChange();
-  }
-
-  async _flushQueuedCandidates() {
-    if (!this._pc || !this._queuedCandidates.length) return;
-    const items = [...this._queuedCandidates];
-    this._queuedCandidates = [];
-    for (const c of items) {
-      await this._pc.addIceCandidate(c).catch(() => {});
-    }
-  }
-
-  _cleanupMediaOnly() {
-    this._stopRingLoop();
-    clearInterval(this._durationTimer);
-    clearInterval(this._levelTimer);
-    this._durationTimer = null;
-    this._levelTimer = null;
-
-    if (this._localStream) {
-      for (const t of this._localStream.getTracks?.() || []) {
-        try { t.stop(); } catch { /* ignore */ }
-      }
-      this._localStream = null;
-    }
-    if (this._pc) {
-      try { this._pc.close(); } catch { /* ignore */ }
-      this._pc = null;
-    }
-    if (this._audioCtx) {
-      try { this._audioCtx.close(); } catch { /* ignore */ }
-      this._audioCtx = null;
-    }
-    if (this._remoteAudioEl) {
-      try { this._remoteAudioEl.srcObject = null; } catch { /* ignore */ }
-    }
-    this._pendingOfferSdp = null;
-    this._queuedCandidates = [];
-  }
-
-  _teardown(reason = 'Вызов завершён') {
-    this._cleanupMediaOnly();
-    this.state.phase = 'ended';
-    this.state.reason = reason;
-    this.state.micLevel = 0;
-    this.onStateChange();
-    const endedId = this.state.callId;
-    const t = setTimeout(() => {
-      if (this.state.callId === endedId && this.state.phase === 'ended') {
-        this.state = this._emptyState();
-        this.onStateChange();
-      }
-    }, 1800);
-    t?.unref?.();
+    this._emit();
   }
 }

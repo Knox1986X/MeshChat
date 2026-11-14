@@ -6,6 +6,7 @@ import {
   notifyStore,
   setChatTtl,
   toggleChatMute,
+  togglePinChat,
   clearSingleChatHistory,
   deleteChat,
   startVoiceCall,
@@ -125,6 +126,12 @@ export function InspectorPanel() {
     </div>
 
     <div class="inspector-rows">
+      <div class="insp-row" onClick=${() => togglePinChat(chat.id)}>
+        <span class="insp-icon lavender"><${Icon} name="pin" size=${15} /></span>
+        <span class="insp-label">Закрепить вверху списка</span>
+        <span class=${`ios-switch ${chat.pinned ? 'on' : ''}`}><i></i></span>
+      </div>
+
       <div class="insp-row" onClick=${() => toggleChatMute(chat.id)}>
         <span class="insp-icon blue"><${Icon} name="bell" size=${15} /></span>
         <span class="insp-label">Звуковые оповещения</span>

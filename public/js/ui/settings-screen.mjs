@@ -41,6 +41,8 @@ import {
   getStorageStats,
   sendMeshTestPacket,
   requestSystemNotificationAccess,
+  sendTestShadeNotification,
+  toggleAndroidBackgroundService,
   triggerHaptic,
   showToast,
 } from '../store/app-store.mjs';
@@ -791,7 +793,7 @@ function NotificationsSectionView() {
         <h3><${Icon} name="volume" size=${16} /> Уведомления, звуки, звонки и счётчик</h3>
       </div>
 
-      <label class="field-label">Содержимое системных фоновых уведомлений ОС</label>
+      <label class="field-label">Содержимое уведомлений в системной шторке Android / ОС</label>
       <div class="chip-grid">
         ${[
           ['full', 'Имя и текст'],
@@ -801,11 +803,17 @@ function NotificationsSectionView() {
         ].map(([id, lbl]) => html`<button
           key=${id}
           type="button"
-          class=${`choice-chip ${(settings.notificationContent || 'sender') === id ? 'active' : ''}`}
+          class=${`choice-chip ${(settings.notificationContent || 'full') === id ? 'active' : ''}`}
           onClick=${() => updateClientSettings({ notificationContent: id })}
         >${lbl}</button>`)}
+      </div>
+
+      <div class="chip-grid" style="margin-top:8px">
         <button type="button" class="btn-ghost compact" onClick=${requestSystemNotificationAccess}>
           Разрешить в ОС
+        </button>
+        <button type="button" class="btn-primary compact" onClick=${sendTestShadeNotification}>
+          Проверить шторку
         </button>
       </div>
 
@@ -824,6 +832,17 @@ function NotificationsSectionView() {
       </div>
 
       <div class="settings-rows-list">
+        <div
+          class="settings-switch-row"
+          onClick=${() => toggleAndroidBackgroundService(settings.bgKeepAlive === false)}
+        >
+          <div class="plugin-copy">
+            <div class="plugin-title">Фоновая доставка в шторку уведомлений</div>
+            <div class="plugin-sub">Удерживает защищённый E2EE-сокет при свёрнутом приложении для мгновенных оповещений и звонков</div>
+          </div>
+          <button type="button" class=${`ios-switch ${settings.bgKeepAlive !== false ? 'on' : ''}`}><span></span></button>
+        </div>
+
         <div class="settings-switch-row" onClick=${() => updateClientSettings({ sound: settings.sound === false })}>
           <div class="plugin-copy">
             <div class="plugin-title">Звук входящих сообщений</div>

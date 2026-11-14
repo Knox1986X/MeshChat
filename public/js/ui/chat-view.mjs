@@ -149,7 +149,6 @@ export function ChatView() {
   const rawList = (chat && messages[chat.id]) || [];
 
   const [draft, setDraft] = useState('');
-  const [onceToggle, setOnceToggle] = useState(false);
   const [activeMsgActionsId, setActiveMsgActionsId] = useState(null);
   const [unblurredMap, setUnblurredMap] = useState({});
 
@@ -239,13 +238,18 @@ export function ChatView() {
     const files = [...(e.target.files || [])];
     e.target.value = '';
     for (const file of files) {
-      await sendEncryptedAttachment(chat.id, file, { once: onceToggle, caption: draft.trim() });
+      await sendEncryptedAttachment(chat.id, file, { once: false, caption: draft.trim() });
     }
     if (draft.trim()) setDraft('');
   };
 
   const startVoiceRecording = async () => {
     if (recording) return;
+    try {
+      if (globalThis.MeshChatAndroid?.hasAudioPermission && !globalThis.MeshChatAndroid.hasAudioPermission()) {
+        globalThis.MeshChatAndroid.ensureAudioPermission?.();
+      }
+    } catch {}
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       showToast('Запись микрофона недоступна в текущем браузере', 'err');
       return;
@@ -278,7 +282,7 @@ export function ChatView() {
         const blob = new Blob(recChunksRef.current, { type: actualMime });
         if (blob.size < 256) return;
         const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: actualMime });
-        await sendEncryptedAttachment(chat.id, file, { once: onceToggle });
+        await sendEncryptedAttachment(chat.id, file, { once: false });
       };
 
       rec.start(250);
@@ -413,14 +417,14 @@ export function ChatView() {
 
         <button
           type="button"
-          class=${`circle-btn ghost ${chat.pinned ? 'active' : ''}`}
+          class=${`circle-btn ghost hide-compact-mobile ${chat.pinned ? 'active' : ''}`}
           title=${chat.pinned ? 'Открепить чат' : 'Закрепить чат'}
           onClick=${() => togglePinChat(chat.id)}
         ><${Icon} name="pin" size=${15} /></button>
 
         <button
           type="button"
-          class="circle-btn ghost"
+          class="circle-btn ghost hide-compact-mobile"
           title="Экстренная блокировка экрана (двойной Esc)"
           onClick=${() => toggleBossMode(true)}
         ><${Icon} name="eyeOff" size=${15} /></button>
@@ -693,13 +697,6 @@ export function ChatView() {
                 title="Прикрепить зашифрованный файл (AES-256-GCM)"
                 onClick=${() => fileInputRef.current?.click()}
               ><${Icon} name="clip" size=${17} /></button>
-
-              ${chat.kind === 'dm' && html`<button
-                type="button"
-                class=${`composer-icon ${onceToggle ? 'once-active' : ''}`}
-                title="Однократный просмотр [1×]: физическое удаление с узла после первого чтения"
-                onClick=${() => setOnceToggle((v) => !v)}
-              ><${Icon} name="once" size=${17} /></button>`}
 
               <textarea
                 class="composer-input"

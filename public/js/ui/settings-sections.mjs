@@ -395,15 +395,17 @@ export function ReactionsSectionView() {
       <div class="policy-stack">
         ${Object.values(REACTION_PACKS).map((pack) => html`<div
           key=${pack.id}
-          class=${`policy-card ${(settings.reactionPack || 'winter') === pack.id ? 'selected' : ''}`}
+          class=${`policy-card reaction-pack-card ${(settings.reactionPack || 'winter') === pack.id ? 'selected' : ''}`}
           onClick=${() => updateClientSettings({ reactionPack: pack.id })}
         >
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%">
-            <div>
+          <div class="reaction-pack-head">
+            <div class="reaction-pack-copy">
               <div class="policy-title">${pack.label}</div>
               <div class="policy-desc">Доступен в контекстной панели каждого сообщения E2EE</div>
             </div>
-            <div style="font-size:17px;letter-spacing:3px;flex-shrink:0">${pack.emojis.join(' ')}</div>
+            <div class="reaction-pack-emojis">
+              ${pack.emojis.map((em) => html`<span key=${em} class="reaction-pack-emoji-badge">${em}</span>`)}
+            </div>
           </div>
         </div>`)}
       </div>
