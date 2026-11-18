@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Capacitor Android (generated in CI via npx cap add android)
+android/
