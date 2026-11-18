@@ -1,0 +1,77 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [arena/f1e61635-meshchat, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meshchat-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1-demo
+          name: MeshChat v0.1 Demo (Android)
+          prerelease: true
+          body: |
+            ## MeshChat v0.1 Demo — Android APK
+
+            Анонимный мессенджер нового поколения. Демо-режим: интерфейс готов, транспорты — заглушки.
+
+            ### Установка
+            Скачай `app-debug.apk`, установи на Android (разреши установку из неизвестных источников).
+
+            ### Что внутри
+            - Анонимная идентичность (Ed25519, без телефона)
+            - Чаты, сторис, звонки (UI), настройки
+            - 5 транспортов (демо): Cloudflare, Fly.io, WebRTC P2P, Tor, Mesh
+
+            > Ключи Cloudflare/Fly.io пока не подключены — скоро!
+          files: android/app/build/outputs/apk/debug/app-debug.apk
