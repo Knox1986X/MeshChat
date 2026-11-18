@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Manrope", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+html, body, #root { height: 100%; }
+body {
+  background: #07080d;
+  color: #f4f4f8;
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+/* scrollbars */
+.scroll-slim::-webkit-scrollbar { width: 5px; height: 5px; }
+.scroll-slim::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 99px; }
+.scroll-slim::-webkit-scrollbar-track { background: transparent; }
+.scroll-slim { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
+
+/* animations */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { 0% { opacity: 0; transform: scale(.92); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes msgIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes typingDot { 0%, 60%, 100% { transform: translateY(0); opacity: .4; } 30% { transform: translateY(-4px); opacity: 1; } }
+@keyframes pulseRing { 0% { transform: scale(1); opacity: .6; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes waveBar { 0%, 100% { transform: scaleY(.4); } 50% { transform: scaleY(1); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+.anim-fade-up { animation: fadeUp .45s cubic-bezier(.22,1,.36,1) both; }
+.anim-fade-in { animation: fadeIn .3s ease both; }
+.anim-pop { animation: popIn .35s cubic-bezier(.22,1,.36,1) both; }
+.anim-msg { animation: msgIn .3s cubic-bezier(.22,1,.36,1) both; }
+.anim-floaty { animation: floaty 5s ease-in-out infinite; }
+
+.typing-dot { animation: typingDot 1.2s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: .15s; }
+.typing-dot:nth-child(3) { animation-delay: .3s; }
+
+.wave-bar { animation: waveBar 1s ease-in-out infinite; transform-origin: center; }
+
+/* glass */
+.glass {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+  backdrop-filter: blur(18px);
+}
+.glass-strong {
+  background: rgba(16,17,26,.82);
+  border: 1px solid rgba(255,255,255,.08);
+  backdrop-filter: blur(24px);
+}
+
+/* mesh background */
+.mesh-bg {
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 0%, rgba(139,92,246,.22), transparent 60%),
+    radial-gradient(ellipse 50% 45% at 90% 15%, rgba(34,211,238,.14), transparent 60%),
+    radial-gradient(ellipse 45% 40% at 50% 100%, rgba(236,72,153,.10), transparent 60%),
+    #07080d;
+}
+
+/* chat wallpaper */
+.chat-wallpaper {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% -10%, rgba(139,92,246,.10), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 100% 100%, rgba(34,211,238,.06), transparent 60%),
+    #0a0b12;
+}
+
+/* gradient text */
+.grad-text {
+  background: linear-gradient(120deg, #c4b5fd, #8b5cf6 35%, #22d3ee);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.grad-btn {
+  background: linear-gradient(120deg, #7c5cff, #5b8cff 55%, #22d3ee);
+  box-shadow: 0 8px 32px -8px rgba(124,92,255,.55);
+}
+.grad-btn:hover { filter: brightness(1.12); }
+.grad-btn:active { transform: scale(.98); }
+
+/* message bubbles */
+.bubble-me {
+  background: linear-gradient(135deg, #6d4aff, #4f7cff);
+  border-radius: 20px 20px 6px 20px;
+}
+.bubble-them {
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 20px 20px 20px 6px;
+}
+
+/* QR pattern */
+.qr-pattern {
+  background-image:
+    repeating-linear-gradient(0deg, #fff 0 6px, transparent 6px 12px),
+    repeating-linear-gradient(90deg, #fff 0 6px, transparent 6px 12px);
+  background-blend-mode: difference;
+}
+
+/* input */
+input, textarea { outline: none; }
+input:focus, textarea:focus { border-color: rgba(139,92,246,.5) !important; box-shadow: 0 0 0 3px rgba(139,92,246,.15); }
+
+/* safe areas for android */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
