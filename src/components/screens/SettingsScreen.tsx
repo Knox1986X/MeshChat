@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { motion } from 'framer-motion'
 import {
-  Battery, Bell, Download, FolderOpen, Globe, HardDrive, KeyRound, Laptop, LayoutGrid,
-  MessageSquare, MoreVertical, PieChart, Search, Smile, User,
+  Battery, Bell, ChevronRight, Download, FolderOpen, Globe, HardDrive, Headphones, KeyRound, Laptop,
+  LayoutGrid, MessageSquare, MoreVertical, PieChart, Search, Smile, Sparkles, User,
 } from 'lucide-react'
 
 interface Item {
@@ -24,10 +25,14 @@ const ITEMS: Item[] = [
   { icon: Laptop, bg: 'rgba(45,212,191,.16)', color: '#2dd4bf', title: 'Устройства', sub: 'Управление активными сеансами и сетью Mesh' },
   { icon: Battery, bg: 'rgba(251,191,36,.16)', color: '#fbbf24', title: 'Энергосбережение', sub: 'Экономия энергии при низком заряде батареи' },
   { icon: Globe, bg: 'rgba(192,132,252,.18)', color: '#c084fc', title: 'Язык', sub: '', right: 'Русский' },
-  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.1.0' },
+  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.2.0' },
 ]
 
-export default function SettingsScreen() {
+interface Props {
+  onOpenSupport: () => void
+}
+
+export default function SettingsScreen({ onOpenSupport }: Props) {
   const [snow, setSnow] = useState(true)
   const [garland, setGarland] = useState(true)
 
@@ -49,8 +54,37 @@ export default function SettingsScreen() {
       </div>
 
       <div className="flex-1 overflow-y-auto scroll-slim px-4 pb-28 md:pb-6 space-y-2.5">
-        {ITEMS.map(item => (
-          <button key={item.title} className="w-full card card-hover p-4 flex items-center gap-4 text-left">
+        <motion.button
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          whileTap={{ scale: 0.985 }}
+          onClick={onOpenSupport}
+          className="w-full card p-4 flex items-center gap-4 text-left relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, rgba(34,211,238,.20), rgba(99,102,241,.22))' }}
+        >
+          <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center shrink-0 bg-cyan-400/20 text-cyan-200">
+            <Headphones size={24} />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="flex items-center gap-2 font-extrabold text-[16.5px]">
+              Поддержка
+              <span className="text-[9.5px] font-black tracking-wider px-1.5 py-0.5 rounded-md bg-cyan-400/20 text-cyan-200">БОТ</span>
+            </span>
+            <span className="block text-[13px] text-slate-300 leading-snug mt-0.5">Отвечает мгновенно · офлайн · 24/7</span>
+          </span>
+          <ChevronRight size={18} className="text-slate-400 shrink-0" />
+          <Sparkles size={70} className="absolute -right-4 -bottom-6 text-white/[.06]" />
+        </motion.button>
+
+        {ITEMS.map((item, i) => (
+          <motion.button
+            key={item.title}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: Math.min(0.04 + i * 0.03, 0.4) }}
+            whileTap={{ scale: 0.985 }}
+            className="w-full card card-hover p-4 flex items-center gap-4 text-left"
+          >
             <span className="w-[52px] h-[52px] rounded-full flex items-center justify-center shrink-0" style={{ background: item.bg, color: item.color }}>
               <item.icon size={24} />
             </span>
@@ -59,7 +93,7 @@ export default function SettingsScreen() {
               {item.sub && <span className="block text-[13px] text-slate-400 leading-snug mt-0.5">{item.sub}</span>}
             </span>
             {item.right && <span className="text-sky-400 font-bold text-[15px] shrink-0">{item.right}</span>}
-          </button>
+          </motion.button>
         ))}
 
         {/* Theme toggles */}
@@ -79,7 +113,7 @@ export default function SettingsScreen() {
         </div>
 
         <p className="text-center text-[11.5px] text-slate-600 py-3 flex items-center justify-center gap-1.5">
-          <HardDrive size={12} /> MeshChat v2.1.0 · Open Source · Без слежки
+          <HardDrive size={12} /> MeshChat v2.2.0 · Open Source · Без слежки
         </p>
       </div>
     </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Bookmark, LayoutGrid, Pencil, Pin, Search, ShieldCheck, Snowflake } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Bookmark, LayoutGrid, Pencil, Pin, Search, ShieldCheck, Snowflake, Sparkles } from 'lucide-react'
 import type { Chat } from '../../lib/types'
 import Logo from '../Logo'
 
@@ -14,6 +15,16 @@ export function Avatar({ chat, size = 52 }: { chat: Chat; size?: number }) {
     return (
       <div className="relative shrink-0 flex items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600" style={{ width: size, height: size }}>
         <Bookmark size={size * 0.42} className="text-white" fill="white" />
+      </div>
+    )
+  }
+  if (chat.isBot) {
+    return (
+      <div className="relative shrink-0" style={{ width: size, height: size }}>
+        <div className="w-full h-full rounded-full flex items-center justify-center bg-gradient-to-br from-cyan-400 to-indigo-600 shadow-[0_0_22px_-4px_rgba(34,211,238,.7)]">
+          <Sparkles size={size * 0.44} className="text-white" />
+        </div>
+        <span className="absolute -bottom-0.5 -right-0.5 w-[14px] h-[14px] rounded-full bg-emerald-400 border-2 border-[#0c1330] blink-dot" />
       </div>
     )
   }
@@ -51,17 +62,23 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
   const pinned = filtered.filter(c => c.pinned)
   const rest = filtered.filter(c => !c.pinned)
 
-  const row = (chat: Chat) => (
-    <button
+  const row = (chat: Chat, i: number) => (
+    <motion.button
       key={chat.id}
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: Math.min(i * 0.025, 0.2), type: 'spring', stiffness: 420, damping: 34 }}
+      whileTap={{ scale: 0.985 }}
       onClick={() => onSelect(chat.id)}
-      className="w-full flex items-center gap-3.5 px-3 py-3 rounded-[20px] text-left transition-all hover:bg-white/[.045] active:scale-[.99]"
+      className="w-full flex items-center gap-3.5 px-3 py-3 rounded-[20px] text-left transition-colors hover:bg-white/[.045]"
     >
       <Avatar chat={chat} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="font-bold text-[16px] truncate">{chat.name}</p>
-          {chat.verified && <ShieldCheck size={17} className="text-sky-400 shrink-0" fill="rgba(56,189,248,.18)" />}
+          {chat.isBot && <span className="text-[9.5px] font-black tracking-wider px-1.5 py-0.5 rounded-md bg-cyan-400/15 text-cyan-300 shrink-0">БОТ</span>}
+          {chat.verified && !chat.isBot && <ShieldCheck size={17} className="text-sky-400 shrink-0" fill="rgba(56,189,248,.18)" />}
           {chat.pinned && <Pin size={13} className="text-slate-400 shrink-0" />}
           <span className={`ml-auto text-[12px] shrink-0 font-semibold ${chat.unread ? 'text-sky-400' : 'text-slate-500'}`}>
             {chat.lastTime}
@@ -78,7 +95,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
           )}
         </div>
       </div>
-    </button>
+    </motion.button>
   )
 
   return (
@@ -106,7 +123,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
             восстановление канала…
           </span>
           <span className="bg-white/[.06] border border-white/[.07] text-slate-300 text-[12px] font-bold px-3 py-1.5 rounded-full">
-            E2EE v2.1.0
+            E2EE v2.2.0
           </span>
         </div>
       </div>
@@ -116,7 +133,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
           <div className="card p-4 mt-2 mb-4 anim-fade-up" style={{ background: 'linear-gradient(150deg, rgba(37,99,235,.28), rgba(99,102,241,.18))' }}>
             <p className="font-bold text-[15px]">На телефоне осталась старая копия v1.2</p>
             <p className="text-[13px] text-slate-300 mt-1 leading-relaxed">
-              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.1.0
+              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.2.0
             </p>
             <button
               onClick={() => setShowBanner(false)}
@@ -156,22 +173,27 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
         {pinned.length > 0 && (
           <>
             <p className="text-[11.5px] font-extrabold tracking-[.14em] text-slate-500 px-2 mb-1.5">ЗАКРЕПЛЁННЫЕ</p>
-            <div className="space-y-0.5 mb-4">{pinned.map(row)}</div>
+            <div className="space-y-0.5 mb-4">{pinned.map((c, i) => row(c, i))}</div>
           </>
         )}
         <p className="text-[11.5px] font-extrabold tracking-[.14em] text-slate-500 px-2 mb-1.5">ВСЕ ЧАТЫ</p>
-        <div className="space-y-0.5">{rest.map(row)}</div>
+        <div className="space-y-0.5">{rest.map((c, i) => row(c, pinned.length + i))}</div>
         {filtered.length === 0 && <p className="text-center text-slate-500 text-sm py-10">Ничего не найдено</p>}
       </div>
 
       {/* FAB */}
-      <button
+      <motion.button
+        initial={{ scale: 0, rotate: -35 }}
+        animate={{ scale: 1, rotate: 0 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 22, delay: 0.18 }}
+        whileHover={{ scale: 1.06 }}
+        whileTap={{ scale: 0.92 }}
         onClick={onNewChat}
         className="absolute right-4 bottom-24 md:bottom-6 w-14 h-14 rounded-[20px] grad-btn flex items-center justify-center shadow-xl shadow-indigo-500/40 z-10"
         title="Новый чат"
       >
         <Pencil size={22} />
-      </button>
+      </motion.button>
     </div>
   )
 }

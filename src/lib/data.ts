@@ -1,6 +1,21 @@
 import type { Chat, Contact, MeshNode, MeshPlugin } from './types'
+import { SUPPORT_CHIPS, SUPPORT_GREETING } from './supportBot'
 
 export const INITIAL_CHATS: Chat[] = [
+  {
+    id: 'support',
+    name: 'Поддержка MeshChat',
+    handle: 'бот · отвечает мгновенно',
+    avatarFrom: '#22d3ee', avatarTo: '#6366f1',
+    online: true, lastSeen: 'отвечает мгновенно',
+    unread: 1, pinned: true, verified: true, isBot: true,
+    lastMessage: SUPPORT_GREETING.split('\n')[0], lastTime: 'сейчас',
+    chips: SUPPORT_CHIPS,
+    messages: [
+      { id: 'sp0', text: SUPPORT_GREETING, time: '14:02', mine: false, read: true, bot: true },
+      { id: 'sp1', text: 'Кстати, я работаю офлайн: правила и база знаний лежат прямо в приложении, без сервера 🤍', time: '14:02', mine: false, read: true, bot: true },
+    ],
+  },
   {
     id: 'saved',
     name: 'Избранное',

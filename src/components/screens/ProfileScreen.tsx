@@ -100,7 +100,7 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
         <div className="card p-4 flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="font-extrabold text-[16px]">
-              MeshChat v2.1.0{' '}
+              MeshChat v2.2.0{' '}
               <span className="text-[11px] font-bold bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-md align-middle">build 12</span>
             </p>
             <p className="text-[12.5px] text-slate-400 mt-0.5">Автообновление через GitHub Releases без конфликта пакетов</p>

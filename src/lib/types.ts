@@ -9,6 +9,13 @@ export interface Transport {
   icon: string
 }
 
+export interface ReplyRef {
+  id: string
+  name: string
+  text: string
+  mine: boolean
+}
+
 export interface Message {
   id: string
   text: string
@@ -16,10 +23,13 @@ export interface Message {
   mine: boolean
   read: boolean
   reactions?: string[]
-  type?: 'text' | 'voice' | 'image' | 'file'
+  type?: 'text' | 'voice' | 'image' | 'file' | 'system'
   duration?: string
   fileName?: string
   fileSize?: string
+  replyTo?: ReplyRef
+  pending?: boolean
+  bot?: boolean
 }
 
 export interface Chat {
@@ -43,6 +53,8 @@ export interface Chat {
   lastMine?: boolean
   messages: Message[]
   story?: boolean
+  isBot?: boolean
+  chips?: string[]
 }
 
 export interface Identity {
