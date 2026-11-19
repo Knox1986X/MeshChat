@@ -1,12 +1,61 @@
-import type { Chat } from './types'
+import type { Chat, Contact, MeshNode, MeshPlugin } from './types'
 
 export const INITIAL_CHATS: Chat[] = [
+  {
+    id: 'saved',
+    name: 'Избранное',
+    handle: 'локальное хранилище',
+    avatarFrom: '#3b82f6', avatarTo: '#6366f1',
+    online: false, lastSeen: '',
+    unread: 0, pinned: true,
+    lastMessage: 'Локальное хранилище «Избранное»: заметки, статьи и вложения…', lastTime: '14:20:05',
+    messages: [
+      { id: 'sv1', text: 'Здесь хранятся твои заметки и важные сообщения 🔖', time: '14:20', mine: false, read: true },
+    ],
+  },
+  {
+    id: 'echo',
+    name: 'Эхо-проверка E2EE',
+    handle: 'канал самопроверки',
+    avatarFrom: '#8b5cf6', avatarTo: '#6366f1',
+    online: false, lastSeen: '',
+    unread: 0, pinned: true, verified: true, isChannel: true, members: 1,
+    lastMessage: 'Канал самопроверки E2EE и личных зашифрованных заметок. Отправь…', lastTime: '08:53:29',
+    messages: [
+      { id: 'e1', text: 'Канал самопроверки E2EE и личных зашифрованных заметок. Отправь сюда сообщение — оно зашифруется и вернётся эхом 🔒', time: '08:53', mine: false, read: true },
+    ],
+  },
+  {
+    id: 'mixik',
+    name: 'mixik',
+    handle: '@mixik',
+    avatarFrom: '#6366f1', avatarTo: '#4f46e5',
+    online: true, lastSeen: 'На связи · E2EE', verified: true,
+    unread: 0,
+    lastMessage: 'Лор', lastTime: '12:33:22',
+    messages: [
+      { id: 'mx1', text: 'Привет! Связь по X3DH установлена 🔒', time: '12:30', mine: false, read: true },
+      { id: 'mx2', text: 'Лор', time: '12:33', mine: false, read: true },
+    ],
+  },
+  {
+    id: 'gateway',
+    name: 'Входящий шлюз E2E',
+    handle: 'анонимный приём обращений',
+    avatarFrom: '#0ea5e9', avatarTo: '#22d3ee',
+    online: false, lastSeen: 'всегда на связи',
+    unread: 0, verified: true,
+    lastMessage: 'Шлюз принимает зашифрованные обращения без метаданных', lastTime: '08:06:20',
+    messages: [
+      { id: 'gw1', text: 'Шлюз принимает зашифрованные обращения без метаданных. Твоё сообщение никто не отследит 🕶', time: '08:06', mine: false, read: true },
+    ],
+  },
   {
     id: 'anna',
     name: 'Анна Соколова',
     handle: '@anna#7f3a',
     avatarFrom: '#f472b6', avatarTo: '#a855f7',
-    online: true, lastSeen: 'в сети', verified: true, pinned: true,
+    online: true, lastSeen: 'в сети', verified: true,
     unread: 3, story: true,
     lastMessage: 'Скинь, пожалуйста, новый дизайн 🙏', lastTime: '12:42',
     messages: [
@@ -22,7 +71,7 @@ export const INITIAL_CHATS: Chat[] = [
     name: 'MeshChat Dev',
     handle: '@meshchat#0001',
     avatarFrom: '#8b5cf6', avatarTo: '#22d3ee',
-    online: true, lastSeen: 'в сети', verified: true, pinned: true,
+    online: true, lastSeen: 'в сети', verified: true,
     unread: 0, isChannel: true, members: 12840,
     lastMessage: 'v0.1 Demo: интерфейс готов, ждём ключи Cloudflare/Fly.io', lastTime: '11:20',
     messages: [
@@ -59,48 +108,32 @@ export const INITIAL_CHATS: Chat[] = [
       { id: 'm3', text: 'Голосовое сообщение · 0:42', time: '10:15', mine: false, read: true, type: 'voice', duration: '0:42' },
     ],
   },
-  {
-    id: 'kate',
-    name: 'Катя Миронова',
-    handle: '@kate#4d88',
-    avatarFrom: '#06b6d4', avatarTo: '#3b82f6',
-    online: true, lastSeen: 'в сети',
-    unread: 1,
-    lastMessage: 'Ты видел сторис? Там новый логотип', lastTime: '09:48',
-    messages: [
-      { id: 'k1', text: 'Ты видел сторис? Там новый логотип', time: '09:48', mine: false, read: false },
-    ],
-  },
-  {
-    id: 'dima',
-    name: 'Дима Волков',
-    handle: '@dima#12ab',
-    avatarFrom: '#6366f1', avatarTo: '#ec4899',
-    online: false, lastSeen: 'был(а) вчера',
-    unread: 0, muted: true,
-    lastMessage: 'Ок, договорились 🤝', lastTime: 'Вчера',
-    messages: [
-      { id: 'dm1', text: 'Ок, договорились 🤝', time: 'Вчера', mine: true, read: true },
-    ],
-  },
-  {
-    id: 'news',
-    name: 'Новости Mesh',
-    handle: 'канал · 3 421 подписчик',
-    avatarFrom: '#14b8a6', avatarTo: '#22d3ee',
-    online: false, lastSeen: '',
-    unread: 0, isChannel: true, members: 3421,
-    lastMessage: 'Скоро: офлайн-меш по Bluetooth', lastTime: 'Вчера',
-    messages: [
-      { id: 'n1', text: 'Скоро: офлайн-меш по Bluetooth 📡 Работает без интернета, как Briar', time: 'Вчера', mine: false, read: true },
-    ],
-  },
+]
+
+export const CONTACTS: Contact[] = [
+  { id: 'c1', name: 'mixik', handle: '@mixik', avatarFrom: '#6366f1', avatarTo: '#4f46e5', status: 'На связи · E2EE', verified: true, online: true },
+  { id: 'c2', name: 'Анна Соколова', handle: '@anna#7f3a', avatarFrom: '#f472b6', avatarTo: '#a855f7', status: 'в сети · E2EE', verified: true, online: true },
+  { id: 'c3', name: 'Макс Орлов', handle: '@max#9c21', avatarFrom: '#f59e0b', avatarTo: '#ef4444', status: 'был(а) 1 ч назад', verified: false, online: false },
+]
+
+export const MESH_NODES: MeshNode[] = [
+  { id: 'n1', label: '@mixik · X3DH', x: 30, y: 34, color: '#818cf8' },
+  { id: 'n2', label: 'Blind Relay · 173 мс', x: 66, y: 30, color: '#34d399' },
+  { id: 'n3', label: 'CF Edge · 18 мс', x: 72, y: 62, color: '#38bdf8' },
+]
+
+export const MESH_PLUGINS: MeshPlugin[] = [
+  { id: 'p2p', name: 'P2P WebRTC / Wi-Fi LAN', desc: 'Локальный ретранслятор :3000 без интернета', iconBg: 'rgba(56,189,248,.14)', iconColor: '#38bdf8', enabled: true },
+  { id: 'tor', name: 'Tor onion-маршрутизация', desc: 'Строгий режим Fail-Closed через SOCKS5 / Orbot без утечки IP', iconBg: 'rgba(139,92,246,.16)', iconColor: '#a78bfa', enabled: true },
+  { id: 'cf', name: 'Cloudflare Edge WS', desc: 'WebSocket через CDN, обход DPI и блокировок', iconBg: 'rgba(251,191,36,.14)', iconColor: '#fbbf24', enabled: true, badge: 'ДЕМО' },
+  { id: 'fly', name: 'Fly.io Edge', desc: 'Резервный маршрут, EU регионы (Франкфурт)', iconBg: 'rgba(52,211,153,.14)', iconColor: '#34d399', enabled: false, badge: 'ДЕМО' },
+  { id: 'bt', name: 'Bluetooth Mesh', desc: 'Офлайн-меш как Briar, без интернета и SIM', iconBg: 'rgba(251,113,133,.14)', iconColor: '#fb7185', enabled: false },
 ]
 
 export const STORIES = [
   { id: 's1', name: 'Вы', mine: true, from: '#8b5cf6', to: '#22d3ee' },
   { id: 's2', name: 'Анна', from: '#f472b6', to: '#a855f7' },
   { id: 's3', name: 'Макс', from: '#f59e0b', to: '#ef4444' },
-  { id: 's4', name: 'Катя', from: '#06b6d4', to: '#3b82f6' },
+  { id: 's4', name: 'mixik', from: '#6366f1', to: '#4f46e5' },
   { id: 's5', name: 'Команда', from: '#22c55e', to: '#84cc16' },
 ]

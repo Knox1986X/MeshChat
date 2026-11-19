@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Mic, MicOff, PhoneOff, Video, VideoOff } from 'lucide-react'
 import type { Chat } from '../lib/types'
-import { Avatar } from './ChatList'
+import { Avatar } from './screens/ChatsScreen'
 
 interface Props {
   chat: Chat
@@ -23,24 +23,23 @@ export default function CallModal({ chat, kind, onClose }: Props) {
   const ss = String(seconds % 60).padStart(2, '0')
 
   return (
-    <div className="fixed inset-0 z-[70] bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 anim-fade-in" onClick={onClose}>
+    <div className="fixed inset-0 z-[70] bg-[#070b1a]/92 backdrop-blur-xl flex items-center justify-center p-4 anim-fade-in" onClick={onClose}>
       <div className="w-full max-w-sm text-center anim-pop" onClick={e => e.stopPropagation()}>
         <div className="relative inline-block mb-6">
-          <span className="absolute inset-0 rounded-full bg-violet-500/40" style={{ animation: 'pulseRing 2s ease-out infinite' }} />
-          <span className="absolute inset-0 rounded-full bg-cyan-400/30" style={{ animation: 'pulseRing 2s ease-out infinite .6s' }} />
+          <span className="absolute inset-0 rounded-full bg-sky-500/40" style={{ animation: 'pulseRing 2s ease-out infinite' }} />
+          <span className="absolute inset-0 rounded-full bg-indigo-400/30" style={{ animation: 'pulseRing 2s ease-out infinite .6s' }} />
           <div className="relative">
             <Avatar chat={chat} size={110} />
           </div>
         </div>
         <h3 className="text-2xl font-extrabold">{chat.name}</h3>
-        <p className="text-white/50 mt-1 font-mono text-sm">{mm}:{ss} · {kind === 'video' ? 'видео' : 'голос'} · E2E 🔒</p>
+        <p className="text-slate-400 mt-1 font-mono text-sm">{mm}:{ss} · {kind === 'video' ? 'видео' : 'голос'} · E2E 🔒</p>
 
-        {/* waveform */}
         <div className="flex items-center justify-center gap-1 h-10 mt-6">
           {[0.5, 0.9, 0.4, 1, 0.6, 0.8, 0.35, 0.95, 0.55, 0.75, 0.45, 0.85, 0.5, 0.7, 0.4].map((d, i) => (
             <span
               key={i}
-              className="wave-bar w-1.5 rounded-full bg-gradient-to-t from-violet-500 to-cyan-400"
+              className="wave-bar w-1.5 rounded-full bg-gradient-to-t from-sky-500 to-indigo-400"
               style={{ height: 36, animationDelay: `${i * 0.08}s`, animationDuration: `${d}s` }}
             />
           ))}
@@ -57,7 +56,7 @@ export default function CallModal({ chat, kind, onClose }: Props) {
             {camOff ? <VideoOff size={22} /> : <Video size={22} />}
           </button>
         </div>
-        <p className="text-[11px] text-white/30 mt-5">Демо-звонок: WebRTC подключим после ключей</p>
+        <p className="text-[11px] text-slate-500 mt-5">Демо-звонок: WebRTC подключим после ключей</p>
       </div>
     </div>
   )

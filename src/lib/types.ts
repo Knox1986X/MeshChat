@@ -52,3 +52,32 @@ export interface Identity {
   publicKey: string
   createdAt: string
 }
+
+export interface Contact {
+  id: string
+  name: string
+  handle: string
+  avatarFrom: string
+  avatarTo: string
+  status: string
+  verified: boolean
+  online: boolean
+}
+
+export interface MeshPlugin {
+  id: string
+  name: string
+  desc: string
+  iconBg: string
+  iconColor: string
+  enabled: boolean
+  badge?: string
+}
+
+export interface MeshNode {
+  id: string
+  label: string
+  x: number // 0..100 on radar
+  y: number
+  color: string
+}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Check, Copy, QrCode, Search, X } from 'lucide-react'
 import type { Identity } from '../lib/types'
+import Logo from './Logo'
 
 interface Props {
   identity: Identity
@@ -27,12 +28,12 @@ export default function NewChatModal({ identity, onClose }: Props) {
         </div>
 
         <div className="relative mb-5">
-          <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/35" />
+          <Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
             placeholder="Имя или @handle#xxxx"
-            className="w-full bg-white/[.05] border border-white/[.07] rounded-2xl pl-10 pr-4 py-3 text-[14px] placeholder:text-white/30"
+            className="w-full bg-white/[.04] border border-white/[.08] rounded-2xl pl-10 pr-4 py-3 text-[14px] placeholder:text-slate-500"
           />
         </div>
 
@@ -40,23 +41,23 @@ export default function NewChatModal({ identity, onClose }: Props) {
           <div className="w-24 h-24 rounded-2xl bg-white p-2 shrink-0 relative overflow-hidden">
             <div className="w-full h-full qr-pattern opacity-90" />
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-8 h-8 rounded-lg grad-btn flex items-center justify-center text-[13px] font-extrabold">M</div>
+              <Logo size={34} />
             </div>
           </div>
           <div className="min-w-0">
-            <p className="font-bold flex items-center gap-2"><QrCode size={16} className="text-violet-300" /> Пригласить по QR</p>
-            <p className="text-[12.5px] text-white/45 mt-1 leading-relaxed">Друг сканирует код — и вы сразу в чате. Без телефона и регистрации.</p>
+            <p className="font-bold flex items-center gap-2"><QrCode size={16} className="text-sky-300" /> Пригласить по QR</p>
+            <p className="text-[12.5px] text-slate-400 mt-1 leading-relaxed">Друг сканирует код — и вы сразу в чате. Без телефона и регистрации.</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 bg-black/30 rounded-2xl p-2 pl-4 mb-3">
-          <p className="flex-1 text-[12.5px] font-mono text-white/60 truncate">{link}</p>
+          <p className="flex-1 text-[12.5px] font-mono text-slate-400 truncate">{link}</p>
           <button onClick={copy} className="grad-btn rounded-xl px-3.5 py-2 text-[13px] font-bold flex items-center gap-1.5 shrink-0">
             {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? 'Скопировано' : 'Копировать'}
           </button>
         </div>
 
-        <p className="text-[11.5px] text-white/35 text-center">Твой handle: <span className="font-mono text-violet-300">{identity.handle}</span></p>
+        <p className="text-[11.5px] text-slate-500 text-center">Твой handle: <span className="font-mono text-sky-300">{identity.handle}</span></p>
       </div>
     </div>
   )
