@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Camera, Check, Copy, Fingerprint, Palette, Pencil, QrCode, ShieldCheck, X } from 'lucide-react'
 import type { Identity } from '../../lib/types'
 import KeyVerifyModal from '../KeyVerifyModal'
+import { formatBytes, readEgress, resetEgress, totalNetwork } from '../../lib/metrics'
+import { Gauge } from 'lucide-react'
 
 interface Props {
   identity: Identity
@@ -13,6 +15,7 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
   const [showVerify, setShowVerify] = useState(false)
   const [panic, setPanic] = useState(false)
+  const [egress, setEgress] = useState(() => readEgress())
   const taps = useRef<{ n: number; at: number }>({ n: 0, at: 0 })
 
   // Паника-жест: три тапа по аватару за 2 секунды
@@ -129,11 +132,45 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
           <ShieldCheck size={19} className="text-slate-400 shrink-0" />
         </button>
 
+        {/* Честный счётчик утечки */}
+        <div className="card p-4 mb-3">
+          <div className="flex items-center gap-2">
+            <Gauge size={17} className="text-emerald-300" />
+            <p className="font-extrabold text-[15px]">Честный счётчик утечки</p>
+            <button
+              onClick={() => { resetEgress(); setEgress(readEgress()) }}
+              className="ml-auto text-[11px] font-bold text-slate-400 px-2 py-1 rounded-lg bg-white/[.05]"
+            >
+              сброс
+            </button>
+          </div>
+          <p className="text-[24px] font-extrabold mt-1.5 tabular-nums">
+            {formatBytes(totalNetwork(egress))}
+            <span className="text-[12px] font-semibold text-slate-400 ml-2">ушло в сеть</span>
+          </p>
+          <div className="grid grid-cols-3 gap-2 mt-2.5">
+            {[
+              { label: 'relay', value: egress.relay, color: '#38bdf8' },
+              { label: 'P2P', value: egress.p2p, color: '#34d399' },
+              { label: 'Tor', value: egress.tor, color: '#a78bfa' },
+            ].map(x => (
+              <div key={x.label} className="bg-black/25 rounded-xl px-2.5 py-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">{x.label}</p>
+                <p className="text-[13px] font-bold tabular-nums" style={{ color: x.color }}>{formatBytes(x.value)}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11.5px] text-slate-500 mt-2 leading-relaxed">
+            Локальная обработка: {formatBytes(egress.local)}. Пока транспорт в демо — в сеть не уходит ничего,
+            и счётчик это подтверждает. В onion-only режиме здесь должен оставаться ноль.
+          </p>
+        </div>
+
         {/* Version card */}
         <div className="card p-4 flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="font-extrabold text-[16px]">
-              MeshChat v2.3.0{' '}
+              MeshChat v2.4.0{' '}
               <span className="text-[11px] font-bold bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-md align-middle">build 12</span>
             </p>
             <p className="text-[12.5px] text-slate-400 mt-0.5">Автообновление через GitHub Releases без конфликта пакетов</p>

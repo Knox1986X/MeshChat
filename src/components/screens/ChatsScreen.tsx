@@ -1,13 +1,16 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Bookmark, LayoutGrid, Pencil, Pin, Search, ShieldCheck, Snowflake, Sparkles } from 'lucide-react'
-import type { Chat } from '../../lib/types'
+import type { Chat, ChatRequest } from '../../lib/types'
+import { CHAT_REQUESTS } from '../../lib/data'
+import { Check, X } from 'lucide-react'
 import Logo from '../Logo'
 
 interface Props {
   chats: Chat[]
   onSelect: (id: string) => void
   onNewChat: () => void
+  onAcceptRequest: (r: ChatRequest) => void
 }
 
 export function Avatar({ chat, size = 52 }: { chat: Chat; size?: number }) {
@@ -45,10 +48,11 @@ export function Avatar({ chat, size = 52 }: { chat: Chat; size?: number }) {
 
 const FILTERS = ['Все', 'Непрочитанные', 'Личные', 'Проверенные']
 
-export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
+export default function ChatsScreen({ chats, onSelect, onNewChat, onAcceptRequest }: Props) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState(0)
   const [showBanner, setShowBanner] = useState(true)
+  const [requests, setRequests] = useState<ChatRequest[]>(CHAT_REQUESTS)
 
   const filtered = chats.filter(c => {
     const q = query.toLowerCase()
@@ -123,7 +127,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
             восстановление канала…
           </span>
           <span className="bg-white/[.06] border border-white/[.07] text-slate-300 text-[12px] font-bold px-3 py-1.5 rounded-full">
-            E2EE v2.3.0
+            E2EE v2.4.0
           </span>
         </div>
       </div>
@@ -133,7 +137,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
           <div className="card p-4 mt-2 mb-4 anim-fade-up" style={{ background: 'linear-gradient(150deg, rgba(37,99,235,.28), rgba(99,102,241,.18))' }}>
             <p className="font-bold text-[15px]">На телефоне осталась старая копия v1.2</p>
             <p className="text-[13px] text-slate-300 mt-1 leading-relaxed">
-              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.3.0
+              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.4.0
             </p>
             <button
               onClick={() => setShowBanner(false)}
@@ -169,6 +173,52 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
             </button>
           ))}
         </div>
+
+        {requests.length > 0 && !query && (
+          <div className="mb-4">
+            <p className="text-[11.5px] font-extrabold tracking-[.14em] text-slate-500 px-2 mb-1.5">
+              ЗАПРОСЫ НА ПЕРЕПИСКУ · {requests.length}
+            </p>
+            <div className="space-y-2">
+              {requests.map(r => (
+                <motion.div
+                  key={r.id}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="card p-3.5"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-full flex items-center justify-center font-extrabold text-white text-[14px] shrink-0"
+                      style={{ background: `linear-gradient(135deg, ${r.avatarFrom}, ${r.avatarTo})` }}
+                    >
+                      {r.name.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-[14px] truncate">{r.name} <span className="text-slate-500 font-medium text-[12px]">{r.handle}</span></p>
+                      <p className="text-[12.5px] text-slate-400 truncate">{r.text}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-2.5">
+                    <button
+                      onClick={() => { onAcceptRequest(r); setRequests(prev => prev.filter(x => x.id !== r.id)) }}
+                      className="flex-1 grad-btn rounded-xl py-2 text-[12.5px] font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <Check size={14} /> Принять
+                    </button>
+                    <button
+                      onClick={() => setRequests(prev => prev.filter(x => x.id !== r.id))}
+                      className="px-4 rounded-xl bg-white/[.06] border border-white/[.07] text-[12.5px] font-bold text-slate-300 flex items-center gap-1.5"
+                    >
+                      <X size={14} /> Отклонить
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {pinned.length > 0 && (
           <>

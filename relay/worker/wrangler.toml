@@ -1,0 +1,23 @@
+name = "meshchat-relay"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Слепые комнаты (WebSocket). Ничего не храним — только пересылка кадров.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+[vars]
+RELAY_VERSION = "2.4.0"
+DEMO = "0"
+# Разрешить конкретный origin вместо "*" (например, https://mesh.chat)
+ALLOWED_ORIGIN = "*"
+
+# Секреты задаются не здесь, а командами:
+#   npx wrangler secret put GIGACHAT_CLIENT_ID
+#   npx wrangler secret put GIGACHAT_CLIENT_SECRET
+#   npx wrangler secret put RELAY_KEY       (необязательно)

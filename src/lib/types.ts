@@ -32,6 +32,18 @@ export interface Message {
   bot?: boolean
   /** метка исчезновения (epoch ms) */
   expiresAt?: number
+  /** запланировано к отправке (epoch ms) */
+  scheduledFor?: number
+}
+
+export interface ChatRequest {
+  id: string
+  name: string
+  handle: string
+  text: string
+  time: string
+  avatarFrom: string
+  avatarTo: string
 }
 
 export interface Chat {

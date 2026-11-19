@@ -25,7 +25,7 @@ const ITEMS: Item[] = [
   { icon: Laptop, bg: 'rgba(45,212,191,.16)', color: '#2dd4bf', title: 'Устройства', sub: 'Управление активными сеансами и сетью Mesh' },
   { icon: Battery, bg: 'rgba(251,191,36,.16)', color: '#fbbf24', title: 'Энергосбережение', sub: 'Экономия энергии при низком заряде батареи' },
   { icon: Globe, bg: 'rgba(192,132,252,.18)', color: '#c084fc', title: 'Язык', sub: '', right: 'Русский' },
-  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.3.0' },
+  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.4.0' },
 ]
 
 interface Props {
@@ -35,8 +35,16 @@ interface Props {
 export default function SettingsScreen({ onOpenSupport }: Props) {
   const [snow, setSnow] = useState(true)
   const [garland, setGarland] = useState(true)
-  const [quiet, setQuiet] = useState(false)
-  const [blur, setBlur] = useState(true)
+  const ls = (k: string, def: boolean) => {
+    try { const v = localStorage.getItem(`meshchat_privacy_${k}`); return v === null ? def : v === '1' } catch { return def }
+  }
+  const persist = (k: string, v: boolean) => {
+    try { localStorage.setItem(`meshchat_privacy_${k}`, v ? '1' : '0') } catch {}
+  }
+  const [quiet, setQuiet] = useState(() => ls('quiet', false))
+  const [blur, setBlur] = useState(() => ls('blur', true))
+  const [hideTyping, setHideTyping] = useState(() => ls('typing', false))
+  const [hideRead, setHideRead] = useState(() => ls('read', false))
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -102,8 +110,10 @@ export default function SettingsScreen({ onOpenSupport }: Props) {
         <div className="card p-4">
           <p className="font-extrabold text-[15px] mb-3">🌙 Приватность и тишина</p>
           {[
-            { label: 'Тихие часы 23:00–08:00', sub: 'Уведомления без текста', on: quiet, set: setQuiet },
-            { label: 'Скрывать превью на локскрине', sub: 'Как в Signal', on: blur, set: setBlur },
+            { label: 'Тихие часы 23:00–08:00', sub: 'Уведомления без текста', on: quiet, set: (v: boolean) => { setQuiet(v); persist('quiet', v) } },
+            { label: 'Скрывать превью на локскрине', sub: 'Как в Signal', on: blur, set: (v: boolean) => { setBlur(v); persist('blur', v) } },
+            { label: 'Скрывать «печатает…»', sub: 'Собеседник не видит, что ты пишешь', on: hideTyping, set: (v: boolean) => { setHideTyping(v); persist('typing', v) } },
+            { label: 'Скрывать прочтение', sub: 'У собеседника только «доставлено»', on: hideRead, set: (v: boolean) => { setHideRead(v); persist('read', v) } },
           ].map(t => (
             <div key={t.label} className="flex items-center justify-between py-2 gap-3">
               <span className="min-w-0">
@@ -135,7 +145,7 @@ export default function SettingsScreen({ onOpenSupport }: Props) {
         </div>
 
         <p className="text-center text-[11.5px] text-slate-600 py-3 flex items-center justify-center gap-1.5">
-          <HardDrive size={12} /> MeshChat v2.3.0 · Open Source · Без слежки
+          <HardDrive size={12} /> MeshChat v2.4.0 · Open Source · Без слежки
         </p>
       </div>
     </div>

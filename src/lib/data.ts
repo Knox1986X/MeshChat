@@ -1,4 +1,4 @@
-import type { Chat, Contact, MeshNode, MeshPlugin } from './types'
+import type { Chat, ChatRequest, Contact, MeshNode, MeshPlugin } from './types'
 import { SUPPORT_CHIPS, SUPPORT_GREETING } from './supportBot'
 
 export const INITIAL_CHATS: Chat[] = [
@@ -151,4 +151,24 @@ export const STORIES = [
   { id: 's3', name: 'Макс', from: '#f59e0b', to: '#ef4444' },
   { id: 's4', name: 'mixik', from: '#6366f1', to: '#4f46e5' },
   { id: 's5', name: 'Команда', from: '#22c55e', to: '#84cc16' },
+]
+
+
+export const CHAT_REQUESTS: ChatRequest[] = [
+  {
+    id: 'r1',
+    name: 'Неизвестный узел',
+    handle: '@anon#f41c',
+    text: 'Привет. Нашёл твой инвайт в канале Mesh. Можно спросить про транспорт?',
+    time: '09:41',
+    avatarFrom: '#64748b', avatarTo: '#334155',
+  },
+  {
+    id: 'r2',
+    name: 'Лена К.',
+    handle: '@lena#8b02',
+    text: 'Это ты писал про офлайн-меш? Хочу протестировать на телефоне',
+    time: 'вчера',
+    avatarFrom: '#a855f7', avatarTo: '#6366f1',
+  },
 ]

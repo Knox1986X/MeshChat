@@ -6,10 +6,11 @@ import { Avatar } from './screens/ChatsScreen'
 interface Props {
   chat: Chat
   kind: 'voice' | 'video'
+  huddle?: boolean
   onClose: () => void
 }
 
-export default function CallModal({ chat, kind, onClose }: Props) {
+export default function CallModal({ chat, kind, huddle, onClose }: Props) {
   const [seconds, setSeconds] = useState(0)
   const [muted, setMuted] = useState(false)
   const [camOff, setCamOff] = useState(kind === 'voice')
@@ -33,7 +34,7 @@ export default function CallModal({ chat, kind, onClose }: Props) {
           </div>
         </div>
         <h3 className="text-2xl font-extrabold">{chat.name}</h3>
-        <p className="text-slate-400 mt-1 font-mono text-sm">{mm}:{ss} · {kind === 'video' ? 'видео' : 'голос'} · E2E 🔒</p>
+        <p className="text-slate-400 mt-1 font-mono text-sm">{mm}:{ss} · {huddle ? 'хаддл' : kind === 'video' ? 'видео' : 'голос'} · E2E 🔒</p>
 
         <div className="flex items-center justify-center gap-1 h-10 mt-6">
           {[0.5, 0.9, 0.4, 1, 0.6, 0.8, 0.35, 0.95, 0.55, 0.75, 0.45, 0.85, 0.5, 0.7, 0.4].map((d, i) => (

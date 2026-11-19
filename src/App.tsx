@@ -15,7 +15,7 @@ import NewChatModal from './components/NewChatModal'
 import Logo from './components/Logo'
 import { INITIAL_CHATS } from './lib/data'
 import { clearIdentity, loadIdentity } from './lib/identity'
-import type { Chat, Identity, Message, TransportId } from './lib/types'
+import type { Chat, ChatRequest, Identity, Message, TransportId } from './lib/types'
 
 const TAB_ORDER: Tab[] = ['chats', 'contacts', 'mesh', 'profile', 'settings']
 
@@ -27,7 +27,7 @@ export default function App() {
   const [direction, setDirection] = useState(1)
   const [transport, setTransport] = useState<TransportId>('cloudflare')
   const [showNewChat, setShowNewChat] = useState(false)
-  const [call, setCall] = useState<{ kind: 'voice' | 'video' } | null>(null)
+  const [call, setCall] = useState<{ kind: 'voice' | 'video'; huddle?: boolean } | null>(null)
 
   const activeChat = chats.find(c => c.id === activeId) ?? null
 
@@ -59,6 +59,25 @@ export default function App() {
     setChats(prev => prev.map(c => c.id === chatId
       ? { ...c, messages: c.messages.filter(m => m.id !== msgId) }
       : c))
+  }
+
+  const acceptRequest = (r: ChatRequest) => {
+    const chat: Chat = {
+      id: `req-${r.id}`,
+      name: r.name,
+      handle: r.handle,
+      avatarFrom: r.avatarFrom,
+      avatarTo: r.avatarTo,
+      online: false,
+      lastSeen: 'был(а) недавно',
+      unread: 0,
+      lastMessage: 'Запрос принят — напиши первым',
+      lastTime: r.time,
+      messages: [{ id: `rq${Date.now()}`, text: r.text, time: r.time, mine: false, read: true }],
+    }
+    setChats(prev => [chat, ...prev])
+    setActiveId(chat.id)
+    setTabState('chats')
   }
 
   const openChat = (id: string) => {
@@ -101,7 +120,7 @@ export default function App() {
                 onBack={() => setActiveId(null)}
                 transport={transport}
                 setTransport={setTransport}
-                onCall={kind => setCall({ kind })}
+                onCall={(kind, huddle) => setCall({ kind, huddle })}
                 onSend={handleSend}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
@@ -118,7 +137,12 @@ export default function App() {
               className="flex-1 min-h-0"
             >
               {tab === 'chats' && (
-                <ChatsScreen chats={chats} onSelect={setActiveId} onNewChat={() => setShowNewChat(true)} />
+                <ChatsScreen
+                  chats={chats}
+                  onSelect={setActiveId}
+                  onNewChat={() => setShowNewChat(true)}
+                  onAcceptRequest={acceptRequest}
+                />
               )}
               {tab === 'contacts' && <ContactsScreen identity={identity} onOpenChat={openChat} />}
               {tab === 'mesh' && <MeshScreen />}
@@ -140,7 +164,7 @@ export default function App() {
 
       <AnimatePresence>
         {call && activeChat && (
-          <CallModal chat={activeChat} kind={call.kind} onClose={() => setCall(null)} />
+          <CallModal chat={activeChat} kind={call.kind} huddle={call.huddle} onClose={() => setCall(null)} />
         )}
       </AnimatePresence>
       <AnimatePresence>

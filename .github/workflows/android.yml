@@ -45,6 +45,9 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: Generate app icons and splash
+        run: npx capacitor-assets generate --android
+
       - name: Build debug APK
         working-directory: android
         run: |
@@ -62,20 +65,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.1-demo
-          name: MeshChat v0.1 Demo (Android)
+          name: MeshChat v2.4 (Android)
           prerelease: true
           body: |
-            ## MeshChat v0.1 Demo — Android APK
+            ## MeshChat v2.4 — Android APK
 
-            Анонимный мессенджер нового поколения. Демо-режим: интерфейс готов, транспорты — заглушки.
+            Анонимный мессенджер нового поколения. Демо-режим: интерфейс готов, транспорты ждут relay.
 
             ### Установка
             Скачай `app-debug.apk`, установи на Android (разреши установку из неизвестных источников).
 
             ### Что внутри
             - Анонимная идентичность (Ed25519, без телефона)
-            - Чаты, сторис, звонки (UI), настройки
-            - 5 транспортов (демо): Cloudflare, Fly.io, WebRTC P2P, Tor, Mesh
+            - Чаты, 5 транспортов, Mesh-радар, профиль E2EE
+            - Поддержка в 3 режимах: офлайн-база, GigaChat по ключу, живой оператор
+            - Свайп-ответ, реакции, исчезающие сообщения, паника-жест
+            - Новая иконка: лампочка в двойном шестиугольнике
 
-            > Ключи Cloudflare/Fly.io пока не подключены — скоро!
+            > Транспорты включатся после деплоя relay (см. DEPLOY.md)
           files: android/app/build/outputs/apk/debug/app-debug.apk

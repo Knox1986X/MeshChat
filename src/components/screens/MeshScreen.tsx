@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Globe, RefreshCw, Wifi } from 'lucide-react'
 import { MESH_NODES, MESH_PLUGINS } from '../../lib/data'
+import RelayCard from '../RelayCard'
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
@@ -42,6 +43,8 @@ export default function MeshScreen() {
       </div>
 
       <div className="flex-1 overflow-y-auto scroll-slim px-4 pb-28 md:pb-6">
+        <RelayCard />
+
         {/* Radar */}
         <div className="card p-4 mb-5 overflow-hidden">
           <div className="relative aspect-square max-h-[320px] mx-auto">
@@ -121,7 +124,7 @@ export default function MeshScreen() {
           <p className="font-bold text-[14.5px]">🛡 Автопереключение</p>
           <p className="text-[13px] text-slate-400 mt-1.5 leading-relaxed">
             Если основной транспорт заблокируют, MeshChat сам переключится на резервный — без VPN и ручных настроек.
-            Cloudflare и Fly.io ключи подключаются позже.
+            Как только relay на Cloudflare ответит «здоров», плагины Cloudflare и Fly.io станут рабочими, а не демо.
           </p>
         </div>
       </div>

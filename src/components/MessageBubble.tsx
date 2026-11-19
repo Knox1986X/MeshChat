@@ -164,13 +164,18 @@ export default function MessageBubble({ msg, reduced, index, now, onReply, onMen
               {msg.reactions.join(' ')}
             </motion.span>
           )}
+          {!!msg.scheduledFor && (
+            <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${msg.mine ? 'text-sky-100' : 'text-sky-300'}`}>
+              🕒 {new Date(msg.scheduledFor).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           {!!msg.expiresAt && (
             <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${msg.mine ? 'text-amber-100' : 'text-amber-300'}`}>
               ⏳ {Math.max(0, Math.ceil(((msg.expiresAt - (now ?? Date.now())) / 1000)))}
             </span>
           )}
           <span className={`text-[10.5px] ${msg.mine ? 'text-white/55' : 'text-slate-500'}`}>{msg.time}</span>
-          {msg.mine && (msg.pending
+          {msg.mine && (msg.pending && !msg.scheduledFor
             ? <span className="w-3 h-3 rounded-full border border-white/50 border-t-transparent animate-spin" />
             : msg.read
               ? <CheckCheck size={14} className="text-cyan-200" />

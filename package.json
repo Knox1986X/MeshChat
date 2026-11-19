@@ -1,13 +1,14 @@
 {
   "name": "meshchat",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "assets": "node scripts/make-assets.mjs && capacitor-assets generate --android"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.5",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@capacitor/android": "^8.6.2",
+    "@capacitor/assets": "^4.0.0",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
     "@types/node": "^24.19.2",
@@ -27,6 +29,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.90.0",
+    "sharp": "^0.35.5",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"
   }

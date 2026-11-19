@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  ArrowDown, ArrowLeft, ChevronDown, Clock, Copy, CornerUpLeft, Forward, Info, Lock, Mic, Paperclip,
-  Phone, Smile, Sparkles, Trash2, Video, X,
+  ArrowDown, ArrowLeft, CalendarClock, ChevronDown, Clock, Copy, CornerUpLeft, Forward, Info, Lock, Mic, Paperclip,
+  Phone, Radio, Smile, Sparkles, Trash2, Video, X,
 } from 'lucide-react'
 import type { Chat, Message, TransportId } from '../lib/types'
 import { REPLIES, TRANSPORTS } from '../lib/transports'
@@ -10,6 +10,8 @@ import { Avatar } from './screens/ChatsScreen'
 import MessageBubble from './MessageBubble'
 import { botReply, makeTicket, SUPPORT_CHIPS } from '../lib/supportBot'
 import { askGigaChat, type ChatTurn } from '../lib/gigachat'
+import { recordBytes } from '../lib/metrics'
+import ScheduleSheet from './ScheduleSheet'
 import { newTicket, operatorLabel, saveTickets, loadTickets, useSupportPrefs } from '../lib/supportPrefs'
 import SupportConfig from './SupportConfig'
 
@@ -19,7 +21,7 @@ interface Props {
   onBack: () => void
   transport: TransportId
   setTransport: (t: TransportId) => void
-  onCall: (kind: 'voice' | 'video') => void
+  onCall: (kind: 'voice' | 'video', huddle?: boolean) => void
   onSend: (chatId: string, msg: Message) => void
   onUpdate: (chatId: string, msgId: string, patch: Partial<Message>) => void
   onDelete: (chatId: string, msgId: string) => void
@@ -52,6 +54,7 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
   const [showJump, setShowJump] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const [showConfig, setShowConfig] = useState(false)
+  const [showSchedule, setShowSchedule] = useState(false)
   const { prefs: supportPrefs } = useSupportPrefs()
   const [timerSec, setTimerSec] = useState(() => Number(localStorage.getItem(timerKey(chat.id)) ?? 0))
   const [clock, setClock] = useState(Date.now())
@@ -95,6 +98,34 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
     if (expired.length) expired.forEach(m => onDelete(chat.id, m.id))
   }, [clock, chat.messages, chat.id, onDelete])
 
+  // Отложенные сообщения: срабатывают по таймеру
+  useEffect(() => {
+    const iv = window.setInterval(() => {
+      const due = chat.messages.filter(m => m.scheduledFor && m.scheduledFor <= Date.now())
+      due.forEach(m => onUpdate(chat.id, m.id, { pending: false, scheduledFor: undefined, time: nowTime() }))
+    }, 5000)
+    return () => window.clearInterval(iv)
+  }, [chat.messages, chat.id, onUpdate])
+
+  const scheduleSend = (at: number) => {
+    const t = text.trim()
+    if (!t) return
+    push({
+      id: `sc${Date.now()}`,
+      text: t,
+      time: nowTime(),
+      mine: true,
+      read: false,
+      pending: true,
+      scheduledFor: at,
+      replyTo: replyTo ? { id: replyTo.id, name: replyTo.mine ? 'Вы' : chat.name, text: replyTo.text, mine: replyTo.mine } : undefined,
+    })
+    setText('')
+    setReplyTo(null)
+    setShowSchedule(false)
+    notif(`Отправится ${new Date(at).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}`)
+  }
+
   const cycleTimer = () => {
     const idx = TIMERS.findIndex(t => t.sec === timerSec)
     const next = TIMERS[(idx + 1) % TIMERS.length]
@@ -126,6 +157,8 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
       expiresAt: timerSec ? Date.now() + timerSec * 1000 : undefined,
       replyTo: replyTo ? { id: replyTo.id, name: replyTo.mine ? 'Вы' : chat.name, text: replyTo.text, mine: replyTo.mine } : undefined,
     })
+
+    recordBytes('local', new TextEncoder().encode(t).length + 96)
 
     setText('')
     setReplyTo(null)
@@ -354,6 +387,15 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
             <button onClick={() => onCall('video')} className="w-9 h-9 rounded-full hidden sm:flex items-center justify-center hover:bg-white/[.06] text-slate-300 hover:text-white transition-all active:scale-90">
               <Video size={20} />
             </button>
+            {chat.isGroup && (
+              <button
+                onClick={() => onCall('voice', true)}
+                title="Хаддл — быстрый созвон без приглашений"
+                className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/[.06] text-emerald-300 transition-all active:scale-90"
+              >
+                <Radio size={19} />
+              </button>
+            )}
           </>
         )}
         {chat.isBot && (
@@ -557,6 +599,13 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
               className="flex-1 bg-transparent border-0 py-2.5 text-[15px] placeholder:text-slate-500 resize-none max-h-32"
               style={{ boxShadow: 'none' }}
             />
+            <button
+              onClick={() => { if (!text.trim()) { notif('Напиши сообщение — потом выбери время'); return } setShowSchedule(true) }}
+              title="Отложенная отправка"
+              className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:bg-white/[.06] shrink-0 active:scale-90 transition-transform"
+            >
+              <CalendarClock size={19} />
+            </button>
             <button className="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:bg-white/[.06] shrink-0 active:scale-90 transition-transform">
               <Paperclip size={20} />
             </button>
@@ -608,6 +657,10 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
 
       <AnimatePresence>
         {showConfig && <SupportConfig onClose={() => setShowConfig(false)} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showSchedule && <ScheduleSheet onClose={() => setShowSchedule(false)} onSchedule={scheduleSend} />}
       </AnimatePresence>
 
       {/* ───────────── Context menu (bottom sheet) ───────────── */}
