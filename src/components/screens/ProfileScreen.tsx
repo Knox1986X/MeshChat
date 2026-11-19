@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { Camera, Check, Copy, Palette, Pencil, QrCode, ShieldCheck } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { AlertTriangle, Camera, Check, Copy, Fingerprint, Palette, Pencil, QrCode, ShieldCheck, X } from 'lucide-react'
 import type { Identity } from '../../lib/types'
+import KeyVerifyModal from '../KeyVerifyModal'
 
 interface Props {
   identity: Identity
@@ -9,6 +11,22 @@ interface Props {
 
 export default function ProfileScreen({ identity, onLogout }: Props) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [showVerify, setShowVerify] = useState(false)
+  const [panic, setPanic] = useState(false)
+  const taps = useRef<{ n: number; at: number }>({ n: 0, at: 0 })
+
+  // Паника-жест: три тапа по аватару за 2 секунды
+  const tapAvatar = () => {
+    const now = Date.now()
+    const fresh = now - taps.current.at < 2000
+    const n = fresh ? taps.current.n + 1 : 1
+    taps.current = { n, at: now }
+    navigator.vibrate?.(n >= 3 ? 40 : 12)
+    if (n >= 3) {
+      taps.current = { n: 0, at: 0 }
+      setPanic(true)
+    }
+  }
 
   const copy = async (what: string, value: string) => {
     try { await navigator.clipboard.writeText(value) } catch {}
@@ -36,8 +54,8 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
           <span className="inline-block bg-white/[.06] border border-white/[.08] text-slate-200 text-[12.5px] font-bold px-4 py-1.5 rounded-full mb-4">
             На связи · E2EE
           </span>
-          <div className="relative inline-block">
-            <div className="w-[104px] h-[104px] rounded-[30px] grad-btn flex items-center justify-center text-[38px] font-extrabold mx-auto">
+          <div className="relative inline-block" onClick={tapAvatar}>
+            <div className="w-[104px] h-[104px] rounded-[30px] grad-btn flex items-center justify-center text-[38px] font-extrabold mx-auto active:scale-95 transition-transform">
               {identity.username[0].toUpperCase()}
             </div>
             <button className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full bg-sky-500 flex items-center justify-center shadow-lg shadow-sky-500/40 border-[3px] border-[#131c3d]">
@@ -96,11 +114,26 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
           </button>
         </div>
 
+        {/* Key verification */}
+        <button
+          onClick={() => setShowVerify(true)}
+          className="w-full card card-hover p-4 flex items-center gap-3 text-left mb-3"
+        >
+          <span className="w-11 h-11 rounded-full bg-emerald-400/15 text-emerald-300 flex items-center justify-center shrink-0">
+            <Fingerprint size={21} />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block font-extrabold text-[15.5px]">Сверить ключ с собеседником</span>
+            <span className="block text-[12.5px] text-slate-400 mt-0.5">6 эмодзи вместо 60 цифр · защита от MITM</span>
+          </span>
+          <ShieldCheck size={19} className="text-slate-400 shrink-0" />
+        </button>
+
         {/* Version card */}
         <div className="card p-4 flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <p className="font-extrabold text-[16px]">
-              MeshChat v2.2.0{' '}
+              MeshChat v2.3.0{' '}
               <span className="text-[11px] font-bold bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-md align-middle">build 12</span>
             </p>
             <p className="text-[12.5px] text-slate-400 mt-0.5">Автообновление через GitHub Releases без конфликта пакетов</p>
@@ -114,6 +147,54 @@ export default function ProfileScreen({ identity, onLogout }: Props) {
           Выйти и удалить ключи
         </button>
       </div>
+
+      <AnimatePresence>
+        {showVerify && <KeyVerifyModal identity={identity} onClose={() => setShowVerify(false)} />}
+      </AnimatePresence>
+
+      {/* Паника-жест */}
+      <AnimatePresence>
+        {panic && (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center p-5">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setPanic(false)}
+              className="absolute inset-0 bg-rose-950/70 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+              className="relative w-full max-w-sm card p-5 border-rose-500/30"
+              style={{ background: 'linear-gradient(160deg, rgba(76,5,25,.96), rgba(30,10,30,.96))' }}
+            >
+              <button onClick={() => setPanic(false)} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <X size={15} />
+              </button>
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-300 flex items-center justify-center mb-3">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-[19px] font-extrabold">Паника: стереть всё?</h3>
+              <p className="text-[13px] text-slate-300 mt-2 leading-relaxed">
+                Приватный ключ и локальная история будут уничтожены навсегда. Восстановить нельзя —
+                у собеседников сообщения останутся, у тебя нет.
+              </p>
+              <div className="flex gap-2 mt-4">
+                <button onClick={() => setPanic(false)} className="flex-1 bg-white/[.08] rounded-xl py-3 font-bold text-[13.5px]">
+                  Отмена
+                </button>
+                <button
+                  onClick={() => { setPanic(false); onLogout() }}
+                  className="flex-1 bg-rose-500 rounded-xl py-3 font-bold text-[13.5px] active:scale-95 transition-transform"
+                >
+                  Стереть ключи
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

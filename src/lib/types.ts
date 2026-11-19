@@ -30,6 +30,8 @@ export interface Message {
   replyTo?: ReplyRef
   pending?: boolean
   bot?: boolean
+  /** метка исчезновения (epoch ms) */
+  expiresAt?: number
 }
 
 export interface Chat {

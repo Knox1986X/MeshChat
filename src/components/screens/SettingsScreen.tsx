@@ -25,7 +25,7 @@ const ITEMS: Item[] = [
   { icon: Laptop, bg: 'rgba(45,212,191,.16)', color: '#2dd4bf', title: 'Устройства', sub: 'Управление активными сеансами и сетью Mesh' },
   { icon: Battery, bg: 'rgba(251,191,36,.16)', color: '#fbbf24', title: 'Энергосбережение', sub: 'Экономия энергии при низком заряде батареи' },
   { icon: Globe, bg: 'rgba(192,132,252,.18)', color: '#c084fc', title: 'Язык', sub: '', right: 'Русский' },
-  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.2.0' },
+  { icon: Download, bg: 'rgba(125,211,252,.16)', color: '#7dd3fc', title: 'Обновления и диагностика', sub: 'Релизы GitHub, проверка целостности APK и криптоядра', right: 'v2.3.0' },
 ]
 
 interface Props {
@@ -35,6 +35,8 @@ interface Props {
 export default function SettingsScreen({ onOpenSupport }: Props) {
   const [snow, setSnow] = useState(true)
   const [garland, setGarland] = useState(true)
+  const [quiet, setQuiet] = useState(false)
+  const [blur, setBlur] = useState(true)
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -96,6 +98,26 @@ export default function SettingsScreen({ onOpenSupport }: Props) {
           </motion.button>
         ))}
 
+        {/* Quiet hours + privacy toggles */}
+        <div className="card p-4">
+          <p className="font-extrabold text-[15px] mb-3">🌙 Приватность и тишина</p>
+          {[
+            { label: 'Тихие часы 23:00–08:00', sub: 'Уведомления без текста', on: quiet, set: setQuiet },
+            { label: 'Скрывать превью на локскрине', sub: 'Как в Signal', on: blur, set: setBlur },
+          ].map(t => (
+            <div key={t.label} className="flex items-center justify-between py-2 gap-3">
+              <span className="min-w-0">
+                <span className="block text-[14px] text-slate-200 font-semibold">{t.label}</span>
+                <span className="block text-[11.5px] text-slate-500">{t.sub}</span>
+              </span>
+              <button onClick={() => t.set(!t.on)} className={`w-[52px] h-[30px] rounded-full p-1 transition-all shrink-0 ${t.on ? 'bg-sky-500' : 'bg-slate-600/60'}`}>
+                <span className={`block w-[22px] h-[22px] rounded-full bg-white shadow transition-transform ${t.on ? 'translate-x-[22px]' : ''}`} />
+              </button>
+            </div>
+          ))}
+          <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">Подсказка: тройное нажатие по аватару в профиле — паника-жест, стирает ключи.</p>
+        </div>
+
         {/* Theme toggles */}
         <div className="card p-4">
           <p className="font-extrabold text-[15px] mb-3">🎄 Новогодняя тема</p>
@@ -113,7 +135,7 @@ export default function SettingsScreen({ onOpenSupport }: Props) {
         </div>
 
         <p className="text-center text-[11.5px] text-slate-600 py-3 flex items-center justify-center gap-1.5">
-          <HardDrive size={12} /> MeshChat v2.2.0 · Open Source · Без слежки
+          <HardDrive size={12} /> MeshChat v2.3.0 · Open Source · Без слежки
         </p>
       </div>
     </div>

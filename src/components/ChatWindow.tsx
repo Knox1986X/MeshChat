@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
-  ArrowDown, ArrowLeft, ChevronDown, Copy, CornerUpLeft, Forward, Info, Lock, Mic, Paperclip,
+  ArrowDown, ArrowLeft, ChevronDown, Clock, Copy, CornerUpLeft, Forward, Info, Lock, Mic, Paperclip,
   Phone, Smile, Sparkles, Trash2, Video, X,
 } from 'lucide-react'
 import type { Chat, Message, TransportId } from '../lib/types'
@@ -9,6 +9,9 @@ import { REPLIES, TRANSPORTS } from '../lib/transports'
 import { Avatar } from './screens/ChatsScreen'
 import MessageBubble from './MessageBubble'
 import { botReply, makeTicket, SUPPORT_CHIPS } from '../lib/supportBot'
+import { askGigaChat, type ChatTurn } from '../lib/gigachat'
+import { newTicket, operatorLabel, saveTickets, loadTickets, useSupportPrefs } from '../lib/supportPrefs'
+import SupportConfig from './SupportConfig'
 
 interface Props {
   chat: Chat
@@ -23,6 +26,15 @@ interface Props {
 }
 
 const EMOJIS = ['😀', '😂', '❤️', '🔥', '👍', '😍', '🎉', '😢', '🙏', '💯', '🤝', '😎']
+
+const TIMERS: { sec: number; label: string }[] = [
+  { sec: 0, label: 'Выкл' },
+  { sec: 30, label: '30 сек' },
+  { sec: 3600, label: '1 час' },
+  { sec: 86400, label: '24 часа' },
+]
+
+const timerKey = (id: string) => `meshchat_timer_${id}`
 
 function nowTime() {
   return new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
@@ -39,6 +51,10 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
   const [chips, setChips] = useState<string[]>(chat.isBot ? SUPPORT_CHIPS : [])
   const [showJump, setShowJump] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [showConfig, setShowConfig] = useState(false)
+  const { prefs: supportPrefs } = useSupportPrefs()
+  const [timerSec, setTimerSec] = useState(() => Number(localStorage.getItem(timerKey(chat.id)) ?? 0))
+  const [clock, setClock] = useState(Date.now())
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -63,7 +79,37 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
   useEffect(() => {
     setReplyTo(null)
     setChips(chat.isBot ? SUPPORT_CHIPS : [])
+    setTimerSec(Number(localStorage.getItem(timerKey(chat.id)) ?? 0))
   }, [chat.id, chat.isBot])
+
+  // Тик для исчезающих сообщений
+  useEffect(() => {
+    if (!timerSec) return
+    const iv = window.setInterval(() => setClock(Date.now()), 1000)
+    return () => window.clearInterval(iv)
+  }, [timerSec])
+
+  // Физическое удаление истёкших
+  useEffect(() => {
+    const expired = chat.messages.filter(m => m.expiresAt && m.expiresAt <= clock)
+    if (expired.length) expired.forEach(m => onDelete(chat.id, m.id))
+  }, [clock, chat.messages, chat.id, onDelete])
+
+  const cycleTimer = () => {
+    const idx = TIMERS.findIndex(t => t.sec === timerSec)
+    const next = TIMERS[(idx + 1) % TIMERS.length]
+    setTimerSec(next.sec)
+    try { localStorage.setItem(timerKey(chat.id), String(next.sec)) } catch {}
+    navigator.vibrate?.(10)
+    push({
+      id: `tm${Date.now()}`,
+      text: next.sec ? `Таймер исчезновения: ${next.label} — сообщения удаляются у обоих` : 'Таймер исчезновения выключен',
+      time: nowTime(),
+      mine: false,
+      read: true,
+      type: 'system',
+    })
+  }
 
   const push = (msg: Message) => onSend(chat.id, msg)
 
@@ -77,6 +123,7 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
       time: nowTime(),
       mine: true,
       read: false,
+      expiresAt: timerSec ? Date.now() + timerSec * 1000 : undefined,
       replyTo: replyTo ? { id: replyTo.id, name: replyTo.mine ? 'Вы' : chat.name, text: replyTo.text, mine: replyTo.mine } : undefined,
     })
 
@@ -86,6 +133,74 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
     setChips([])
 
     if (chat.isBot) {
+      if (supportPrefs.mode === 'human') {
+        const ticket = newTicket(t)
+        timers.current.push(window.setTimeout(() => {
+          push({
+            id: `q${Date.now()}`,
+            text: `Заявка ${ticket.id} в очереди · операторов онлайн: 2 · средний ответ ~12 мин`,
+            time: nowTime(),
+            mine: false,
+            read: true,
+            type: 'system',
+          })
+        }, 400))
+        timers.current.push(window.setTimeout(() => setTyping(true), 1200))
+        timers.current.push(window.setTimeout(() => {
+          setTyping(false)
+          push({
+            id: `op${Date.now()}`,
+            text: `Кирилл, поддержка MeshChat:\n\nПринял заявку ${ticket.id}. Уже смотрю — уточни, пожалуйста, модель телефона и что происходит по шагам. Если есть скриншот, пришли сюда же.`,
+            time: nowTime(),
+            mine: false,
+            read: true,
+            bot: true,
+          })
+          saveTickets(loadTickets().map(x => x.id === ticket.id ? { ...x, status: 'answered', operator: 'Кирилл' } : x))
+        }, 3800))
+        return
+      }
+
+      if (supportPrefs.mode === 'ai') {
+        const history: ChatTurn[] = chat.messages
+          .filter(m => m.type !== 'system')
+          .slice(-8)
+          .map(m => ({ role: m.mine ? 'user' : 'assistant', content: m.text }))
+
+        setTyping(true)
+        askGigaChat(t, history, supportPrefs.gigachat)
+          .then(answer => {
+            setTyping(false)
+            push({
+              id: `b${Date.now()}`,
+              text: answer,
+              time: nowTime(),
+              mine: false,
+              read: true,
+              bot: true,
+            })
+            setChips(['Создать тикет', 'Как работает шифрование?', 'Что с транспортами?'])
+          })
+          .catch(() => {
+            setTyping(false)
+            const fallback = botReply(t, {
+              username: username || 'друг',
+              handle: chat.handle,
+              messageCount: chat.messages.length,
+            })
+            push({
+              id: `bf${Date.now()}`,
+              text: `GigaChat недоступен — отвечает локальная база знаний.\nНастройки → Поддержка → проверить ключ.\n\n${fallback.text}`,
+              time: nowTime(),
+              mine: false,
+              read: true,
+              bot: true,
+            })
+            setChips(fallback.chips ?? SUPPORT_CHIPS)
+          })
+        return
+      }
+
       const answer = botReply(t, {
         username: username || 'друг',
         handle: chat.handle,
@@ -184,7 +299,7 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
             {typing
               ? <span className="text-sky-400">печатает…</span>
               : chat.isBot
-                ? <span className="text-emerald-300">бот · отвечает мгновенно</span>
+                ? <span className="text-emerald-300">{operatorLabel(supportPrefs.mode).toLowerCase()} · отвечает сразу</span>
                 : chat.online ? 'в сети' : chat.lastSeen}
           </p>
         </div>
@@ -243,10 +358,11 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
         )}
         {chat.isBot && (
           <button
-            onClick={() => notif('Все ответы — локальная база знаний, без сервера')}
-            className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/[.06] text-slate-300 active:scale-90 transition-transform"
+            onClick={() => setShowConfig(true)}
+            className="flex items-center gap-1.5 h-9 px-2.5 rounded-full bg-white/[.05] border border-white/[.08] text-[11.5px] font-bold text-slate-200 hover:bg-white/[.09] active:scale-95 transition-all"
           >
-            <Info size={19} />
+            <Info size={14} className="text-sky-300" />
+            <span className="hidden sm:inline">{operatorLabel(supportPrefs.mode)}</span>
           </button>
         )}
       </div>
@@ -256,8 +372,24 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
         <div className="flex items-center gap-1.5 bg-black/25 border border-white/[.06] rounded-full px-3 py-1">
           <Lock size={11} className="text-emerald-300" />
           <span className="text-[11px] text-slate-400">
-            {chat.isBot ? 'Локальный бот · работает офлайн' : 'Зашифровано end-to-end · Double Ratchet'}
+            {chat.isBot
+              ? supportPrefs.mode === 'ai'
+                ? 'GigaChat AI · вопрос уходит только текстом'
+                : supportPrefs.mode === 'human'
+                  ? 'Живой оператор · тикет без имени и телефона'
+                  : 'Локальная база знаний · работает офлайн'
+              : 'Зашифровано end-to-end · Double Ratchet'}
           </span>
+          {!chat.isBot && (
+            <button
+              onClick={cycleTimer}
+              className={`ml-1 flex items-center gap-1 rounded-full pl-1.5 pr-2 py-0.5 transition-colors ${timerSec ? 'bg-amber-400/20 text-amber-200' : 'text-slate-500 hover:text-slate-300'}`}
+              title="Таймер исчезновения"
+            >
+              <Clock size={11} />
+              <span className="text-[10.5px] font-bold">{timerSec ? TIMERS.find(t => t.sec === timerSec)?.label : 'таймер'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -277,6 +409,7 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
             msg={msg}
             index={i}
             reduced={reduced}
+            now={clock}
             onReply={handleReply}
             onMenu={setMenuMsg}
             onReact={handleReact}
@@ -333,7 +466,7 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
 
       {/* Быстрые подсказки бота */}
       <AnimatePresence>
-        {!!chips.length && !typing && (
+        {!!chips.length && !typing && supportPrefs.mode !== 'human' && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -472,6 +605,10 @@ export default function ChatWindow({ chat, username, onBack, transport, setTrans
           </p>
         )}
       </div>
+
+      <AnimatePresence>
+        {showConfig && <SupportConfig onClose={() => setShowConfig(false)} />}
+      </AnimatePresence>
 
       {/* ───────────── Context menu (bottom sheet) ───────────── */}
       <AnimatePresence>

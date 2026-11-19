@@ -103,7 +103,7 @@ export default function Onboarding({ onDone }: { onDone: (id: Identity) => void 
         </div>
 
         <p className="text-center text-xs text-slate-600 mt-6">
-          Open Source · Double Ratchet · Mesh-транспорт · v2.2.0
+          Open Source · Double Ratchet · Mesh-транспорт · v2.3.0
         </p>
       </div>
     </div>

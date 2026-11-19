@@ -7,6 +7,7 @@ interface Props {
   msg: Message
   reduced?: boolean
   index: number
+  now?: number
   onReply: (msg: Message) => void
   onMenu: (msg: Message) => void
   onReact: (msg: Message, emoji: string) => void
@@ -22,7 +23,7 @@ const bubbleIn = {
   },
 }
 
-export default function MessageBubble({ msg, reduced, index, onReply, onMenu, onReact }: Props) {
+export default function MessageBubble({ msg, reduced, index, now, onReply, onMenu, onReact }: Props) {
   const [dragging, setDragging] = useState(false)
   const [burst, setBurst] = useState(0)
   const x = useMotionValue(0)
@@ -162,6 +163,11 @@ export default function MessageBubble({ msg, reduced, index, onReply, onMenu, on
             >
               {msg.reactions.join(' ')}
             </motion.span>
+          )}
+          {!!msg.expiresAt && (
+            <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${msg.mine ? 'text-amber-100' : 'text-amber-300'}`}>
+              ⏳ {Math.max(0, Math.ceil(((msg.expiresAt - (now ?? Date.now())) / 1000)))}
+            </span>
           )}
           <span className={`text-[10.5px] ${msg.mine ? 'text-white/55' : 'text-slate-500'}`}>{msg.time}</span>
           {msg.mine && (msg.pending

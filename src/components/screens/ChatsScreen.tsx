@@ -123,7 +123,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
             восстановление канала…
           </span>
           <span className="bg-white/[.06] border border-white/[.07] text-slate-300 text-[12px] font-bold px-3 py-1.5 rounded-full">
-            E2EE v2.2.0
+            E2EE v2.3.0
           </span>
         </div>
       </div>
@@ -133,7 +133,7 @@ export default function ChatsScreen({ chats, onSelect, onNewChat }: Props) {
           <div className="card p-4 mt-2 mb-4 anim-fade-up" style={{ background: 'linear-gradient(150deg, rgba(37,99,235,.28), rgba(99,102,241,.18))' }}>
             <p className="font-bold text-[15px]">На телефоне осталась старая копия v1.2</p>
             <p className="text-[13px] text-slate-300 mt-1 leading-relaxed">
-              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.2.0
+              Удалите старый пакет в 1 нажатие — все будущие обновления теперь идут поверх текущей версии v2.3.0
             </p>
             <button
               onClick={() => setShowBanner(false)}
