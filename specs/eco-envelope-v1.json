@@ -1,0 +1,21 @@
+{
+  "status": "draft-not-production",
+  "magic_hex": "45434f31",
+  "version": 1,
+  "header_bytes": 108,
+  "tag_bytes": 16,
+  "max_envelope_bytes": 65536,
+  "max_payload_bytes": 65412,
+  "max_ttl_ms": 300000,
+  "max_seq_exclusive": 4294967296,
+  "payload_types": [1, 2, 3, 4, 16, 17, 18, 32, 33, 34],
+  "apps": {
+    "messenger": "00000000000000000000000000000001",
+    "gallery": "00000000000000000000000000000002",
+    "maps": "00000000000000000000000000000003"
+  },
+  "network_cell_bytes": 16384,
+  "stream_chunk_bytes": 65536,
+  "production_registry_approved": false,
+  "production_crypto_profile_frozen": false
+}

@@ -1,0 +1,47 @@
+# Матрица приёмки и методика экспериментов
+
+Все пункты ниже — запланированные тесты, **не результаты текущего репозитория**. Пройдены сейчас лишь unit-тесты эталонного header codec. Артефакты synthetic only, seed/tool versions/OS build/commit/config/power/network setup обязательны. Security tests gate every PR; длительные OEM tests — release candidate. При сбое критерий не меняют задним числом.
+
+|ID/сценарий|Условия|Ожидание|Критерий|
+|---|---|---|---|
+|A01 key substitution|malicious gateway заменяет identity/prekey на каждом этапе|hard stop/IdentityChanged, no auto TOFU|0 user-content bytes отправлены после подмены; old history read-only; SAS mismatch|
+|A02 handshake downgrade|убрать ML-KEM, сменить suite ID/config key, replay old config|reject, diagnostic|0 classical fallback, known-answer vectors совпали на2 независимых реализациях|
+|A03 stale backup|история N−1 и полный filesystem snapshot N−1, перезапуск|history import требует fresh identity, suspicious live rollback blocks send|0 повторов `(key,nonce)` на1M fault-generated operations; отдельно документирован предел external checkpoint|
+|A04 crash atomicity|kill/power loss до/после каждого transaction/fsync/ACK|либо no send, либо committed immutable ciphertext|10k fault runs, нет исчезнувших committed messages/reused keys; retry exact bytes|
+|A05 duplicate/reorder/replay|доставить100 copies, reorder до1000 keys, jump10M|one business effect, bounded reject excessive gap|1 message UI,1 grant effect; RAM не растёт>configured cap; no panic|
+|A06 chunk99%|100MiB file, разрыв последнего cell на99%, corrupt tag/root, swap chunks|chunk retry, final не публикуется до verify|только corrupt/missing chunks retransmitted; final SHA256 совпал; 0 unverified bytes в decoder|
+|A07 mobility|Wi-Fi↔LTE20 раз,20%loss, RTT500ms, reorder|resume immutable ciphertext, text priority|0 duplicate UI; text p95≤5s при доступном≥256kbps; незавершённое видео не блокирует UI|
+|A08 QUIC block|drop UDP443|H3→H2 с теми же identity/gateway rules|usable route≤10s active; no TLS verification changes|
+|A09 domain/CF block|NXDOMAIN/TCP reset всех CF IP, C ingress available|signed independent fallback или honest offline|active recovery≤30s;0 direct queue attempts без consent|
+|A10 consent decline|резерв только direct P2P, user denies|локальная очередь остаётся|pcap0 packets to direct address; no lost drafts|
+|A11 capacity/abuse|queue64MiB/4096cells и TTL30d, bot flood/PoW|quota response, честный UI, other contacts unaffected|RSS/CPU bounded; 429 jitter retries; удаление одной queue не затрагивает другую|
+|A12 invite theft/replay|две активации одновременно, TTL expire|one-use CAS, обе стороны видят SAS verify step|≤1 successful consume; no content до verification; stolen bearer race явно описана|
+|A13 screen/lock/watchdog|Android BFU/AFU, lock во время encode/IPC, USB/OTG|vault closed; generic notifications; keys zeroized where controlled|≤1s core revoke после события,≤2s worker cancel; instrumentation no reachable core secret buffers; без заявления очистки всей OS RAM|
+|A14 APK validation|modified1bit, wrong signer, unsigned, v4-only, old version, signer lineage unapproved|installer не вызывается|100% reject; valid exact artifact signer+hash accepted; installed version monotonic|
+|A15 TUF attacks|replay timestamp/snapshot, mix targets, expire root, threshold−1, clock±year|fail closed; local history работает|0 unauthorized install/config; clear stale-clock error; no `trustAll` code|
+|A16 hostile IPC|wrong UID, permission preclaim, same cert wrong app, old lineage, wrong target/seq/epoch|deny до sensitive output|0 plaintext/resource handles leaked; every Binder method exercised|
+|A17 plaintext forensics|logcat/adb backup/D2D, filesystem, WAL, temp, index/thumbnail, notifications, crash|только ciphertext/generic content|synthetic canary strings/EXIF coords не найдены вне allowed live RAM; test limitations recorded|
+|A18 media sanitizer|photo EXIF/GPS/XMP/ICC comments, MP4 metadata, codec tags, PRNU samples, malicious files|reencode allowlist, no metadata, sandbox failures|metadata corpus100% expected strip,0 original files fallback; visible pixels/voices residual acknowledged|
+|A19 GPX/maps|XXE/DTD/oversize, click geo point, offline tile cache|reject hostile GPX; no remote geocoding|pcap0 network запросов Maps/Gallery; bounded parser time/RAM; valid coords rendered|
+|A20 background OEM|Xiaomi/Samsung/Huawei+GrapheneOS,AOSP; API29/34/35+ supported current|no content push, truthful delay status, FGS budgets respected|24/72h results per mode; timeout no crash, battery target or documented release stop|
+|A21 IPC stream|duplicate fd, wrong stream ID/index, abort/lock99%, revoked grant|no double use/data release after revocation|one-use grant effect, no finalized partial resource, no plaintext temp|
+|A22 proxy/DNS|local SOCKS denied/restarted, system DNS capture, DoH blocked|no direct fallback, offline|0 DNS53/853 unless explicitly selected policy;0 direct destination packets outside proxy/bootstrap allowlist|
+|A23 disk pressure|2GB RAM device, storage<output size, fill during WAL commit/video|bounded RAM/backpressure, recoverable ENOSPC|no partial final file,no plaintext spill,no corrupt ratchet,UI cancel≤1s|
+|A24 queue failover|kill origin after queue durable ACK, primary lost|secondary pre-established binding, dedup|same message ID shown1time, no changed peer trust; if no replica honest pending/lost status|
+|A25 offline/shutdown|30d,TTL expired; all WAN off, file transport; corrupted bundle|local history/IPC работает, expiry visible, offline bundle bounded|valid bundle delivers1time; unknown keys не auto-trusted; malformed100k corpus no panic|
+|A26 reproducibility|2 isolated builders same source/toolchain/source epoch|unsigned bytes exact or documented signing normalization|SHA256 unsigned identical; signed result verifiable with reproducible signature-copy procedure; mismatch blocks signing|
+|A27 anti-spam PoW|low end phone and GPU/server clients, thermal throttling|bounded cost, challenge signed expiry/max difficulty|mobile p95≤500ms,target200–500ms; verifier≤5ms target, no unbounded memory; bot economics report not «решено»|
+|A28 phase2 linking/groups/calls|rogue link QR, removed MLS member, STUN server enabled|reject rogue, no future epoch to removed peer, no direct ICE|нет network direct candidates; group old/new epoch assertions; phase2 release gate|
+
+## Измерения сети, корреляции и энергии
+
+1. Стенд: два Android endpoint, independent ingress+queue, netem loss0/5/20%, RTT20/100/500ms, bandwidth256kbps/1/10/50Mbps. 10k text deliveries для p99; ≥5 независимых24h energy runs на режим/модель, idle baseline в те же radio conditions, shuffle order, thermal log. Энергия внешним power monitor предпочтительна, Battery Historian/batterystats дополнительно; mAh = integral mA·dt/3600, доля battery относительно фактической ёмкости, Wh для сравнения разных напряжений.
+2. pcap у клиента/ingress/queue; отдельный replay dataset synthetic, никаких настоящих адресов/переписки в GitHub/Dropbox. Сохранять encrypted raw pcap только локально с ограниченным TTL; публиковать агрегаты/генерируемые трассы. Часы синхронизированы на стенде, не ослаблять production checks.
+3. Проверить ciphertext application body length16384; TLS records/HTTP frames/IP datagrams будут другими. Capture inner test harness до TLS без secrets только для assertions, не production logging. Нет queue IDs/contact IDs/plaintext geo в outer URL/headers/SNI. SNI при неудаче ECH виден — тест должен это показать, а не скрыть результат.
+4. Классификатор знает timestamps/length/direction и пытается различить idle/text/photo/video/geo, связать sender↔receiver. Train/test разделить по дням/устройствам, ≥1000 sessions/class; отчёт AUC, precision@k, mutual-information estimate и confidence intervals. Сравнить no cover vs active cover capped25%, jitter150ms; целевая гипотеза уменьшить correlation AUC≥0.1 при overhead≤25% в активном режиме и text p95 дополнительной задержки≤250ms. Неуспех → не включать cover по умолчанию и не заявлять anonymity. Это не критерий победы над глобальным противником.
+5. Считать bytes/input useful bytes, requests/day, radio wakeups, CPU/codec time, peak RSS, fsync latency, traffic в data saver. Polling базовый сценарий15min ±20% jitter, не гарантированный точный OS запуск. 96 polls/day *2*16384=3145728B=3MiB минимум;5min=9MiB. Multicontact отдельные poll payloads увеличат бюджет: отчёт при1/10/100 contacts; global multiplex экономит radio, но gateway связывает очереди — указать tradeoff.
+6. Для100MiB video: E2EE payload capacity `C=16384−H`, где H включает точный frozen outer/inner framing и AEAD tags. Пока H не frozen, нельзя публиковать точный throughput «на проводе». `N=ceil(104857600/C)`, traffic≥N*16384 плюс HTTP/TLS/retries/cover; no 100MB single POST. Encode time и network time отдельно, pipeline overlap/low disk отдельно.
+7. Load:10k reconnect одновременно, full jitter1..300s, admission quotas; p99 gateway queue wait<1s target на declared hardware; CPU<80%, no unbounded pending sockets, queue limits enforced before allocation. WAF actual zone/tariff tested, no production secret in evidence.
+
+## Критерий общего выпуска
+Все P0 и A01–A27 применимые v1 зелёные с проверенными evidence; unsupported OS/features явно выключены. p99/battery ошибки оцениваются на реальных данных, SLO не факт до измерения. CI parser tests не заменяют криптоаудит, Android instrumented tests, OEM trials или independent rebuild.
