@@ -58,6 +58,12 @@ impl Vault {
     }
 }
 
+// Destruction of the owning FFI object is revocation, even when an old attempt
+// still holds an Arc to the runtime. Do not rely only on Kotlin calling shutdown.
+impl Drop for Vault {
+    fn drop(&mut self) { let _ = self.runtime.shutdown(); }
+}
+
 #[derive(uniffi::Object)]
 pub struct UnlockAttempt {
     runtime: Arc<VaultRuntime>,
@@ -122,6 +128,16 @@ mod tests {
         let reopen = vault.begin_unlock().unwrap(); reopen.open_existing(vec![7; 32]).unwrap();
         vault.shutdown().unwrap();
         assert!(matches!(vault.begin_unlock(), Err(VaultError::Closed)));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn owner_destruction_revokes_retained_attempt() {
+        let path = directory();
+        let vault = Vault::new(path.to_string_lossy().into_owned(), vec![1; 16]).unwrap();
+        let attempt = vault.begin_unlock().unwrap();
+        drop(vault);
+        assert!(matches!(attempt.create(vec![7; 32]), Err(VaultError::StaleUnlock)));
+        assert!(!path.join("vault.lab.db").exists());
         std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
