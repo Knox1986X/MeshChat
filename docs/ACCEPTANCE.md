@@ -1,6 +1,6 @@
 # Матрица приёмки и методика экспериментов
 
-Все пункты ниже — запланированные тесты, **не результаты текущего репозитория**. Пройдены сейчас лишь unit-тесты эталонного header codec. Артефакты synthetic only, seed/tool versions/OS build/commit/config/power/network setup обязательны. Security tests gate every PR; длительные OEM tests — release candidate. При сбое критерий не меняют задним числом.
+Все пункты ниже — запланированные системные тесты, **не заявление об их прохождении**. Фактические Python/Rust/JVM проверки, Android compile/lint и LAB APK build описаны отдельно в `PROGRESS.md`; они не закрывают эту системную матрицу. Артефакты synthetic only, seed/tool versions/OS build/commit/config/power/network setup обязательны. Security tests gate every PR; длительные OEM tests — release candidate. При сбое критерий не меняют задним числом.
 
 |ID/сценарий|Условия|Ожидание|Критерий|
 |---|---|---|---|

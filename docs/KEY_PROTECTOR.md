@@ -1,8 +1,9 @@
 # AndroidKeyProtector: текущий контракт и ограничения
 
-Статус: исходник Android-адаптера, **ещё не скомпилирован/не проверен на устройстве**.
-Не встроен в экран и не используется для реальных ключей. Наличие этого файла не
-закрывает Android hardware release gates. Никаких приватных ключей подписи здесь нет.
+Статус: Android-адаптер скомпилирован в GitHub Actions и подключён к явному
+LAB roundtrip-тесту через системный BiometricPrompt. **На реальном устройстве пока
+не проверен**, для пользовательских ключей/хранилища не используется. Это не
+закрывает hardware release gates. Приватных ключей production-подписи здесь нет.
 
 ## Реализованная граница
 
@@ -27,8 +28,9 @@
   не снимать auth required и не создавать software key ради совместимости.
 - `beginWrap`/`beginUnwrap` возвращает одноразовую операцию. Её `cryptoObject`
   предназначен для `android.hardware.biometrics.BiometricPrompt.authenticate`.
-  Это ещё не реализация prompt UI. Операция завершает JCA `doFinal` только после
-  hardware authorization; передать `authenticated=true` вместо неё невозможно.
+  `BiometricCoordinator` вызывает системный prompt и проверяет identity Cipher
+  из успешного callback. Keystore `doFinal` всё равно требует аппаратного auth;
+  передать `authenticated=true` вместо него невозможно.
 - Cancel/lock: UI обязан одновременно отменить CancellationSignal, закрыть pending
   operation и освободить CryptoObject. `close()` очищает свои buffers/ссылки, но
   не обещает стереть OS provider copies или отозвать уже отданную JVM ссылку.
@@ -37,9 +39,11 @@
   не доказательство очистки всех GC/JNI/codec копий. Не использовать Strings,
   Bundle, SavedState, clipboard или logcat для keys. Unwrap отдаёт ByteArray32;
   его владелец обязан как можно быстрее передать в core и очистить JVM копию.
-- Worker serialized: generation/deletion/operation для одного alias не должны
-  идти параллельно. В текущем коде нет global installation lock/manager; операция
-  защищена `@Synchronized`, но lifecycle orchestration ещё предстоит.
+- Worker serialized: generation/inspection/deletion для тестового alias идут на
+  single-thread worker `HardwareLabController`; authenticated doFinal кратко идёт
+  в main-thread callback. Операции защищены `@Synchronized`. `OperationGate` и
+  Activity отменяют тест на pause/screen-off/timeout60s. Полноценного production
+  installation/vault manager и остановки DB/core decrypt handles пока нет.
 
 ## Формат обёртки (локальный LAB, не EcoEnvelope wire protocol)
 
@@ -82,7 +86,15 @@ gradle :app:connectedDebugAndroidTest
    serialized installation manager; fail-closed на mismatch/error.
 6. Раскрытие класса защиты в UI и отсутствие секретов во всех dumps/logs/backup.
 
-Сейчас permission USE_BIOMETRIC не добавлен: реального prompt UI ещё нет. При его
-реализации требуется manifest permission и полноценные lifecycle/instrumentation
-тесты, а не вызов adapter прямо из Compose recomposition. LAB по-прежнему без
-сети/поля личного ввода/production release variant.
+Permission USE_BIOMETRIC добавлен. Создание тестового ключа запускается только по
+кнопке, не из Compose recomposition. TEE требует отдельного подтверждения. Каждый
+LAB run имеет новый alias/vault ID; предсуществующий alias после ALIAS_EXISTS не
+удаляется. Нормальная отмена планирует удаление созданного тестового alias, но
+process kill/power loss может оставить orphan alias: эта граница видна в UI.
+LAB по-прежнему без сети/поля личного ввода/production release variant.
+
+`OperationGateTest` содержит6 настоящих JVM tests жизненного цикла, выполняемых
+CI отдельно от5 instrumented format tests. Никакой JVM test не является проверкой
+AndroidKeyStore, BiometricPrompt, screen-off broadcast или StrongBox. Отмена prompt
+при pause на отдельных OEM может быть чрезмерно строгой — проверять, а не убирать
+fail-closed policy ради успешной демонстрации.

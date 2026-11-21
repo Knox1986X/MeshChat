@@ -1,42 +1,81 @@
 # Реальный статус реализации
 
-Дата: 2026-11-20. Никакого готового защищённого мессенджера/production APK пока нет.
+Baseline: 2026-11-20. **Это LAB-прототип, не защищённый мессенджер.**
 
 ## Выполнено
 
-1. Архитектура, threat matrix, Red Team, тест-план, local integration draft.
-2. Dependency-free Rust workspace с тремя небольшими библиотеками:
-   - `meshchat-eco-envelope`: exact108-byte big-endian header, bounded payload/envelope, unknown/reserved/version rejection, borrowed ciphertext/AAD/tag. Парсер никогда не обозначает данные проверенными. AEAD/CBOR/replay/grants отсутствуют.
-   - `meshchat-session-policy`: in-memory trust prerequisite, changed-key hard stop, stale challenge rejection, terminal revoke, history restore requires new pairing. Нет libsignal, durable storage, nonce state или send API.
-   - `meshchat-transport-policy`: explicit consent перед QueueSeesClientIp/PeerSeesClientIp, привязка ко всей конфигурации/маршруту, запрет обхода required SOCKS, expiry/clock rollback и same-operator checks. Сетевого adapter ещё нет, operator IDs не доказывают независимость компаний.
-3. Пять Rust-тестов формата, пять тестов доверия и семь тестов transport-policy подготовлены. Общий Python/Rust header fixture лежит в `specs/vectors`. Это первый шаг к interoperability corpus, не crypto vectors.
-4. Android `org.meshchat.lab`: Compose status screen без пользовательского ввода/сети/хранилища, FLAG_SECURE, overlay touch rejection, backup/cloud/device-transfer exclusions. Production package/signing identity не используется, release variant выключен. Ни один ключ или секрет не создавался.
-5. CI дополнен Rust test/clippy job. Python tests дополнены static manifest/backup guards. Android Gradle configs подготовлены, APK pipeline пока отсутствует.
-6. Добавлен исходник `AndroidKeyProtector` (не интегрирован в UI): AES256-GCM AndroidKeyStore, hardware level check, per-use strong biometric auth, явный выбор StrongBox/TEE без software fallback, AAD vault/alias binding, одноразовые closeable операции и best-effort wipe caller ByteArray. Подготовлены5 instrumented operation/format tests на public synthetic software JCA keys; они НЕ тестируют StrongBox и biometric enforcement. Нет prompt UI/lock manager и credential fallback; adapter не выполнялся, реальных keys не создавал.
+1. Архитектура, threat matrix, Red Team, acceptance plan, local integration draft.
+2. Dependency-free Rust workspace:
+   - `eco-envelope`: bounded exact108-byte header, borrowed untrusted ciphertext/AAD/tag; нет AEAD/CBOR/replay/grants.
+   - `session-policy`: unverified/changed identity blocks, stale UI challenge rejection, terminal revoke, history import требует re-pair; нет криптосессии/send API/storage.
+   - `transport-policy`: consent перед повышением IP exposure, exact route/config binding, expiry/clock/SOCKS checks; нет сети и доказательства независимости операторов.
+3. Android Kotlin/Compose `org.meshchat.lab`: отдельный LAB package, no INTERNET/no chats/no personal-data storage/no exported IPC; FLAG_SECURE, obscured touch rejection, backup exclusions, release variant disabled.
+4. `AndroidKeyProtector` AES256-GCM AndroidKeyStore: hardware-only key, StrongBox default/explicit TEE option, per-use strong biometric auth, bounded wrapping format/AAD, одноразовые closeable операции, best-effort caller ByteArray wipe.
+5. Реальный LAB-screen с явным consent: временный hardware key, два системных BiometricPrompt для wrap/unwrap случайного тестового key32, constant-time digest comparison, удаление только alias, созданного этим run. Не отображает/сохраняет plaintext key. TEE AlertDialog не сохраняет разрешение глобально.
+6. `BiometricCoordinator`/`OperationGate`: stale/cross-operation callbacks rejected; cancel на onPause/screen-off, monotonic timeout60s, destroy terminal. При cleanup exception gate poisoned. Отмена main-thread callbacks предшествует cancel OS signal. Creation/deletion и provider setup сериализованы на worker.
+7. Реальный GitHub Actions pipeline: Python checks, Rust tests+clippy, Kotlin compile+JVM tests+lint, debug APK и compile instrumented-test APK. Production signing keys не используются/не загружались. Нет production release.
 
-## Что действительно проверено в рабочем окружении
+## Фактическое CI evidence
 
-|Проверка|Результат|
+Исходник: commit **`4f02c01d4f9da1a5ccfa4f668db84a5c07e5c84b`** в текущей ветке.
+[GitHub Actions run44892385094](https://github.com/Knox1986X/MeshChat/actions/runs/44892385094) завершён **success** для всех3 jobs.
+
+|Проверка|Подтверждённый результат|
 |---|---|
-|`python3 -m unittest discover -s tests -v`|11 тестов прошли|
-|`git diff --check`|прошёл|
-|`tools/check_source_syntax.py` (isolated venv)|Tree-sitter grammar parse9 Rust/Kotlin/Gradle sources прошёл; это НЕ компиляция и не проверка API/types|
-|Rust compilation / unit tests / clippy|НЕ выполнялись: rustc/cargo отсутствуют; workflow подготовлен, результат CI неизвестен|
-|Kotlin/Gradle compilation / APK installation|НЕ выполнялись: JDK/Gradle/Android SDK отсутствуют, Google Maven вне сетевого allowlist|
-|Hardware Keystore, FLAG_SECURE, OEM background tests|НЕ выполнялись; исходник wrapping adapter подготовлен, hardware/biometric enforcement не проверены; lifecycle/background ещё отсутствуют|
-|KeyProtector operation/format tests|5 instrumented тестов подготовлены, НЕ запускались; используют synthetic software cipher, не hardware path|
-|Independent protocol/security audit|НЕ проводился; Red Team документ — анализ проекта, не аудит готового кода|
+|Python format/static guardrails|11 тестов прошли локально и job `header-format` в CI|
+|Rust compile / unit tests / clippy|job `rust-core` success: `cargo test --workspace --locked --offline`, `cargo clippy ... -D warnings`;17 unit tests в3 crates|
+|Android compile / JVM tests / lint|job `android-lab` success;6 `OperationGateTest` JVM tests прошли, failures/errors/skipped=0, lintDebug прошёл|
+|Debug APK|`assembleDebug` success; подписан временным Android debug key runner, не ключом владельца|
+|Instrumented tests|`assembleDebugAndroidTest` success — тестовый APK скомпилирован;5 `KeyProtectorContractTest` НЕ запускались, hardware tests НЕ проводились|
+|Локальный grammar check|13 Rust/Kotlin/Gradle sources разобраны Tree-sitter; не заменяет компиляцию|
+|Hardware StrongBox/TEE, BiometricPrompt, BFU/AFU, OEM/capture/backup|НЕ проверены на устройстве; успешная компиляция не доказывает поведение ОС|
+|Independent security audit|НЕ проводился; Red Team документ — анализ архитектуры, не аудит готового мессенджера|
 
-Нет попыток замаскировать Python static checks под Android instrumented tests. Не выдавать результат `UntrustedHeader::parse` за проверку подписи/tag. В `session-policy` OOB confirmation — модель доверенного пользовательского действия, не доказательство криптографической подлинности; полноценный adapter обязан предоставить authenticated handshake binding и устойчивую транзакционную запись до send.
+Первый CI run44891998358: Android прошёл, Rust упал. После устранения неоднозначности
+`Self::Error` в enum с вариантом `Error` повторный run выше полностью зелёный.
+GitHub checks/annotations получены через API; хранилище сырых logs/артефактов
+использует домены вне allowlist Arena, поэтому raw logs/APK в sandbox не загружены.
+Не выдавать их отсутствие локально за отсутствие результата на GitHub.
+
+## Собранный LAB APK
+
+[Скачать artifact ZIP — MeshChat-LAB-not-a-messenger](https://github.com/Knox1986X/MeshChat/actions/runs/44892385094/artifacts/14702656515)
+
+- Artifact ID14702656515, размер ZIP8226126 bytes, retention7d. Может потребоваться вход в GitHub.
+- Внутри `MeshChat-LAB.apk` и `LAB_WARNING.txt` с commit/hash/tests.
+- **APK SHA256:** `a76abecbb4a81c61d6f15e9636c1174d922288a4410ef95d23ab45b6cae96672`.
+- **ZIP digest** (не APK): `64c10cd960edb61b7bdaaef083d0d7c2d9632967ccb21858a17fc7a5a4484fc5`.
+- APK hash сообщён CI notice, ZIP digest — GitHub artifact API. Сам файл не скачан
+  в Arena из-за запрета исходящего доступа к backing blob storage; проверить APK
+  hash самостоятельно после скачивания пользователем.
+
+Это установочный файл аппаратного эксперимента, **не мессенджер для переписки**.
+При отсутствии StrongBox/strong biometric ожидается отказ, не downgrade. Нужен
+ручной тест на поддерживаемом Android; на OEM prompt может вызывать onPause и
+строгую отмену — не ослаблять политику без анализа. Нормальная отмена удаляет
+временный alias best effort; process kill/power loss может оставить orphan test
+alias, что прямо указано в UI. Он не содержит пользовательской истории. Для
+удаления таких следов можно удалить LAB-приложение.
 
 ## Что дальше
 
-1. На подготовленном build runner скомпилировать Rust/Kotlin, выполнить tests/clippy/Android lint, исправить фактические ошибки. Отладочный APK допустим только с явным LAB-статусом, не для реальной переписки.
-2. Утвердить владельцем AGPL и реальные IDs/cert registry; независимо проверить content PQ suite, routing PQ profile и local handshake exporter. Пока они открыты, не реализовывать сомнительную криптографическую композицию ради быстрого APK.
-3. Скомпилировать/проверить подготовленный AndroidKeyProtector; реализовать BiometricPrompt, lifecycle/lock events и hardware instrumentation на StrongBox/TEE, включая failure/cancel/invalidation. Затем storage/outbox с crash tests и Zeroize secrets. Сейчас никакие реальные secrets не хранятся; best-effort ByteArray.fill(0) не означает очистку всех JVM/OS copies.
-4. Подключить pinned reviewed crypto adapter и UniFFI; реализовать реле/transport policy, SAS, media/geo, IPC и update verification.
-5. Собрать и подписать production APK **только** после закрытия release blockers, real-device tests и локальной подписи владельцем. Production signing keys не запрашивать у владельца в чате и не добавлять в CI.
+1. Установить LAB на реальные API29/30/31/35+ StrongBox/TEE устройства, выполнить
+   hardware matrix, biometric success/cancel/no-enrollment/re-enrollment, экран/
+   background/timeout/rotation/kill tests с записью только обезличенных результатов.
+2. До production утвердить AGPL, package/cert registry и reviewed content-PQ,
+   routing-PQ/local exporter profiles; не изобретать composition ради скорости.
+3. Реализовать production installation/vault lifecycle, поддержку устройств без
+   сильной биометрии без silent weakening, SQLCipher/atomic outbox/Zeroize core,
+   затем reviewed crypto adapter и UniFFI, queues/media/geo/IPC/TUF.
+4. Воспроизводимый build recipe, dependency verification, актуализация pinned CI
+   actions (есть deprecation warnings Node20/setup-java-v4), hardware acceptance
+   и независимый аудит до offline owner signing production APK.
 
-## Не завершённые обязательные release gates
+## Не закрытые release blockers
 
-Точный перечень: `docs/RED_TEAM.md`, `docs/ACCEPTANCE.md`. В частности отсутствуют E2EE, audited PQ routing, аппаратное wrapping, encrypted DB, transactional queues, медиа sandbox, живой IPC, доставка, TUF updater, воспроизводимая Android-сборка и внешняя проверка. Разделять «исходники LAB-оболочки» и «защищённый мессенджер» обязательно.
+Нет E2EE/аудированного PQ routing, DB/ratchet transactions, actual delivery,
+production key/lock lifecycle, media sandbox, live ecosystem IPC, TUF updater,
+reproducibility evidence или независимого code audit. Hardware wrapping adapter
+скомпилирован, но безопасность на устройстве ещё не проверена. Полный перечень:
+`RED_TEAM.md` и `ACCEPTANCE.md`. Проверка политики не является send permit;
+`UntrustedHeader` не является аутентифицированным сообщением.

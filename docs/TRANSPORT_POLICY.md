@@ -29,4 +29,6 @@ bool, логировать, получать из remote config или авто�
 
 Семь Rust-тестов покрывают нормальный split path, обе IP-exposure деградации,
 одинакового/нулевого оператора, смену config/route/exposure, required proxy,
-истечение/откат времени. Подготовлены, но в текущей среде без Rust не запускались.
+истечение/откат времени. Прошли в GitHub Actions вместе с workspace test/clippy;
+ссылка на run/commit и границы в `PROGRESS.md`. Локально в Arena Rust отсутствует.
+Это проверка модели, а не настоящей сети/подписанного config adapter.

@@ -18,10 +18,10 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Unintegrated hardware wrapping adapter; NOT a vault or full lock manager.
+ * Hardware wrapping adapter used only by the explicit LAB roundtrip, NOT a vault.
  * No network or production signing keys. Uses platform AES-GCM, not custom crypto.
- * This class must run on a serialized security worker, never concurrently with
- * alias deletion/replacement. Alias is installation-local, never caller IPC input.
+ * Key management is serialized on a worker; prompt-bound doFinal is short/main.
+ * Never race operations with alias replacement. Alias is never caller IPC input.
  */
 internal class AndroidKeyProtector(private val alias: String) {
     init {
