@@ -18,10 +18,13 @@ android {
         minSdk = 29
         targetSdk = 35
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 1
+        val revision = (System.getenv("GITHUB_SHA") ?: "local").take(40)
+        require(revision.matches(Regex("[a-zA-Z0-9]+")))
+        buildConfigField("String", "SOURCE_REVISION", "\"$revision\"")
+        versionCode = 2
         versionName = "0.1.0-lab-NOT-A-MESSENGER"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

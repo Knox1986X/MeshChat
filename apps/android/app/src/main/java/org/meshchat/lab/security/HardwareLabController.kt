@@ -9,6 +9,7 @@ import java.util.concurrent.Executors
 import java.io.File
 import org.meshchat.corelib.Vault as NativeVault
 import org.meshchat.corelib.VaultException
+import org.meshchat.lab.diagnostics.DiagnosticEvent
 
 /**
  * Explicit LAB-only, ephemeral wrap/unwrap roundtrip. No personal data/persistence.
@@ -20,6 +21,7 @@ internal class HardwareLabController(
     private val activity: Activity,
     ownerIsResumed: () -> Boolean,
     private val report: (String) -> Unit,
+    private val diagnostic: (DiagnosticEvent) -> Unit = {},
 ) : AutoCloseable {
     private class Run(
         val protector: AndroidKeyProtector,
@@ -41,9 +43,12 @@ internal class HardwareLabController(
     fun start(policy: AndroidKeyProtector.EnrollmentPolicy) {
         check(!closed)
         cancel()
+        diagnostic(if (policy == AndroidKeyProtector.EnrollmentPolicy.STRONGBOX_REQUIRED)
+            DiagnosticEvent.START_STRONGBOX else DiagnosticEvent.START_TEE)
         val alias = "meshchat.lab.wrap.v1." + randomBytes(16).joinToString("") { "%02x".format(it.toInt() and 255) }
         val directory = File(activity.noBackupFilesDir, "native-lab-" + alias.substringAfterLast('.'))
         if (!directory.mkdir()) {
+            diagnostic(DiagnosticEvent.PRIVATE_DIRECTORY_FAILED)
             report("Не удалось создать отдельную приватную папку LAB. Тест не запущен.")
             return
         }
@@ -51,10 +56,12 @@ internal class HardwareLabController(
         val core = try {
             NativeVault(directory.canonicalPath, vaultId)
         } catch (_: Exception) {
+            diagnostic(DiagnosticEvent.NATIVE_LOAD_FAILED)
             directory.delete()
             report("Rust-хранилище недоступно. Программной подмены ядра нет.")
             return
         } catch (_: LinkageError) {
+            diagnostic(DiagnosticEvent.NATIVE_LOAD_FAILED)
             directory.delete()
             report("Нативная библиотека не загрузилась. Тест остановлен без fallback.")
             return
@@ -72,12 +79,13 @@ internal class HardwareLabController(
                     if (active !== run || closed) {
                         operation.close()
                     } else {
+                        diagnostic(DiagnosticEvent.HARDWARE_READY)
                         report("Класс: ${level.name}. Подтвердите wrapping тестового ключа.")
                         authenticateWrap(run, operation)
                     }
                 }
             } catch (_: Exception) {
-                activity.runOnUiThread { fail(run, "Hardware key недоступен; автоматического fallback нет.") }
+                activity.runOnUiThread { fail(run, "Hardware key недоступен; автоматического fallback нет.", DiagnosticEvent.HARDWARE_SETUP_FAILED) }
             }
         }
     }
@@ -91,6 +99,7 @@ internal class HardwareLabController(
             } finally {
                 key.fill(0)
             }
+            diagnostic(DiagnosticEvent.WRAP_OK)
             report("Wrapping завершён. Готовится проверка unwrap…")
             worker.execute {
                 try {
@@ -100,11 +109,11 @@ internal class HardwareLabController(
                         else authenticateUnwrap(run, unwrap)
                     }
                 } catch (_: Exception) {
-                    activity.runOnUiThread { fail(run, "Unwrap недоступен. Ключ не пересоздаётся.") }
+                    activity.runOnUiThread { fail(run, "Unwrap недоступен. Ключ не пересоздаётся.", DiagnosticEvent.UNWRAP_SETUP_FAILED) }
                 }
             }
         }, onFailure = {
-            fail(run, "Биометрическая операция отменена или недоступна.")
+            fail(run, "Биометрическая операция отменена или недоступна.", DiagnosticEvent.WRAP_AUTH_FAILED)
         })
     }
 
@@ -120,12 +129,12 @@ internal class HardwareLabController(
                     digest.fill(0)
                 }
                 if (matches) probeNativeStore(run, key.copyOf())
-                else fail(run, "Проверка roundtrip не пройдена.")
+                else fail(run, "Проверка roundtrip не пройдена.", DiagnosticEvent.KEY_ROUNDTRIP_MISMATCH)
             } finally {
                 key.fill(0)
             }
         }, onFailure = {
-            fail(run, "Unwrap отменён или недоступен.")
+            fail(run, "Unwrap отменён или недоступен.", DiagnosticEvent.UNWRAP_AUTH_FAILED)
         })
     }
 
@@ -136,9 +145,11 @@ internal class HardwareLabController(
             run.core.beginUnlock()
         } catch (_: Exception) {
             keyCopy.fill(0)
-            fail(run, "Rust gate не разрешил открытие хранилища.")
+            fail(run, "Rust gate не разрешил открытие хранилища.", DiagnosticEvent.NATIVE_GATE_FAILED)
             return
         }
+        diagnostic(DiagnosticEvent.UNWRAP_OK)
+        diagnostic(DiagnosticEvent.NATIVE_PROBE_STARTED)
         report("Hardware roundtrip выполнен. Проверяется Rust SQLCipher через UniFFI…")
         worker.execute {
             try {
@@ -162,11 +173,12 @@ internal class HardwareLabController(
                 run.core.lockVault()
                 activity.runOnUiThread {
                     if (active === run && !closed) {
+                        diagnostic(DiagnosticEvent.NATIVE_PROBE_OK)
                         finish(run, "Hardware + Rust SQLCipher roundtrip выполнен; lock блокирует доступ. Удаление временных данных…")
                     }
                 }
             } catch (_: Exception) {
-                activity.runOnUiThread { fail(run, "Rust SQLCipher тест остановлен; ключ/БД не пересоздаются автоматически.") }
+                activity.runOnUiThread { fail(run, "Rust SQLCipher тест остановлен; ключ/БД не пересоздаются автоматически.", DiagnosticEvent.NATIVE_PROBE_FAILED) }
             } finally {
                 keyCopy.fill(0)
                 attempt.destroy()
@@ -174,8 +186,10 @@ internal class HardwareLabController(
         }
     }
 
-    private fun fail(run: Run, message: String) {
+    private fun fail(run: Run, message: String, event: DiagnosticEvent) {
         if (active !== run || closed) return
+        diagnostic(event)
+        diagnostic(DiagnosticEvent.TEST_FAILED)
         finish(run, message)
     }
 
@@ -194,11 +208,13 @@ internal class HardwareLabController(
         clearDeadline()
         prompts.cancel()
         if (run != null) {
+            diagnostic(DiagnosticEvent.CANCELLED)
             // Terminal for this run: worker must not start a fresh unlock after cancel.
             try {
                 run.core.shutdown()
                 report("Доступ Rust отозван; ожидается очистка временных данных.")
             } catch (_: Exception) {
+                diagnostic(DiagnosticEvent.SHUTDOWN_FAILED)
                 report("Ошибка закрытия Rust: тест заблокирован; выполняется очистка.")
             }
             cleanup(run)
@@ -237,6 +253,7 @@ internal class HardwareLabController(
                 run.expectedDigest?.fill(0)
                 run.vaultId.fill(0)
             }
+            diagnostic(if (removed) DiagnosticEvent.CLEANUP_OK else DiagnosticEvent.CLEANUP_FAILED)
             if (!removed) activity.runOnUiThread {
                 if (!closed) report("Не удалось удалить тестовый alias; удалите данные LAB-приложения.")
             }

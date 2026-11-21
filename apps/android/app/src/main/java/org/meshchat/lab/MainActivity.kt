@@ -9,6 +9,9 @@ import android.os.Bundle
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.result.contract.ActivityResultContracts
+import org.meshchat.lab.diagnostics.DiagnosticLog
+import org.meshchat.lab.diagnostics.DiagnosticEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
@@ -36,10 +39,31 @@ class MainActivity : ComponentActivity() {
     private var resumed by mutableStateOf(false)
     private var status by mutableStateOf("Тест не запускался. Личные данные не вводите.")
     private lateinit var lab: HardwareLabController
+    private val diagnostics = DiagnosticLog()
+    private var pendingExport: String? = null
+    private var exportStatus by mutableStateOf("")
+    private val saveDiagnostics = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val snapshot = pendingExport
+        pendingExport = null
+        if (uri != null && snapshot != null) {
+            exportStatus = try {
+                checkNotNull(contentResolver.openOutputStream(uri, "wt")).bufferedWriter(Charsets.UTF_8).use { it.write(snapshot) }
+                "Отчёт сохранён по вашему выбору. Пришлите только этот файл, не системный bugreport."
+            } catch (_: Exception) {
+                "Не удалось сохранить отчёт. Содержимое ошибки и URI не записываются."
+            }
+        } else exportStatus = "Экспорт отменён."
+    }
+    private fun diagnosticSnapshot(): String =
+        "source=${BuildConfig.SOURCE_REVISION} version=${BuildConfig.VERSION_NAME} androidApi=${Build.VERSION.SDK_INT}\n" + diagnostics.snapshot()
+
     private var receiverRegistered = false
     private val screenOff = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == Intent.ACTION_SCREEN_OFF && ::lab.isInitialized) lab.cancel()
+            if (intent.action == Intent.ACTION_SCREEN_OFF && ::lab.isInitialized) {
+                diagnostics.record(DiagnosticEvent.SCREEN_OFF)
+                lab.cancel()
+            }
         }
     }
 
@@ -47,16 +71,18 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) window.setHideOverlayWindows(true)
         super.onCreate(savedInstanceState)
-        lab = HardwareLabController(this, { resumed }, { status = it })
+        diagnostics.record(DiagnosticEvent.APP_OPENED)
+        lab = HardwareLabController(this, { resumed }, { status = it }, diagnostics::record)
         window.decorView.filterTouchesWhenObscured = true
         window.decorView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         setContent {
             var confirmTee by remember { mutableStateOf(false) }
+            var preview by remember { mutableStateOf<String?>(null) }
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(24.dp)) {
                         Text("MeshChat LAB", style = MaterialTheme.typography.headlineLarge)
-                        Text("Это НЕ защищённый мессенджер. Сети, сообщений и хранилища нет.")
+                        Text("Тестовая сборка с диагностикой. Это НЕ защищённый мессенджер: сети, переписки и постоянного пользовательского хранилища нет.")
                         Text("Аппаратный тест", style = MaterialTheme.typography.titleLarge)
                         Text("По нажатию создаётся временный тестовый hardware key. Два системных биометрических подтверждения проверяют wrap/unwrap случайных 32 байт; ключ передаётся в Rust SQLCipher через UniFFI для проверки create/lock/reopen, затем очищается; временные БД и alias удаляются по завершении/отмене. При аварийном завершении alias может остаться до удаления LAB-приложения.")
                         Button(enabled = resumed, onClick = {
@@ -67,11 +93,42 @@ class MainActivity : ComponentActivity() {
                         }
                         TextButton(onClick = { lab.cancel() }) { Text("Остановить тест") }
                         Text(status)
+                        Text("Диагностика", style = MaterialTheme.typography.titleLarge)
+                        Text("Только коды этапов и ошибок, версия сборки и Android API. Без ключей, сообщений и системного logcat. До 256 событий в RAM; после завершения процесса журнал пропадёт. Автоотправки нет.")
+                        TextButton(onClick = { preview = diagnosticSnapshot() }) { Text("Просмотреть и экспортировать отчёт") }
+                        TextButton(onClick = {
+                            diagnostics.clear()
+                            preview = null
+                            pendingExport = null
+                            exportStatus = "Журнал очищен. Ранее экспортированные файлы удалите отдельно."
+                        }) { Text("Очистить журнал") }
+                        Text(exportStatus)
                         Text("Ограничения", style = MaterialTheme.typography.titleLarge)
                         Text("Нужна настроенная сильная биометрия. PIN fallback не реализован. Отсутствие StrongBox не вызывает переход на TEE автоматически.")
                         Text("Блокировка экрана или уход из приложения отменяет тест. FLAG_SECURE не защищает от root, камеры или принуждения.")
                         Text("Rust SQLCipher lifecycle подключён через UniFFI только к этому LAB-тесту. E2EE, переписка, доставка, TUF и production release ещё отсутствуют.")
                     }
+                }
+                preview?.let { frozen ->
+                    AlertDialog(
+                        onDismissRequest = { preview = null },
+                        title = { Text("Проверьте отчёт перед сохранением") },
+                        text = {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                Text("Файл будет передан выбранному вами приложению/хранилищу. Облачный провайдер может его загрузить. Отправляйте мне только этот отчёт, не полный bugreport. После выхода в выбор файла текущий тест отменится.\n\n" + frozen)
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                // Cancel and include that event before leaving Activity.
+                                lab.cancel()
+                                pendingExport = diagnosticSnapshot()
+                                preview = null
+                                saveDiagnostics.launch("MeshChat-diagnostics.txt")
+                            }) { Text("Сохранить .txt…") }
+                        },
+                        dismissButton = { TextButton(onClick = { preview = null }) { Text("Закрыть") } },
+                    )
                 }
                 if (confirmTee) {
                     AlertDialog(
@@ -112,6 +169,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         resumed = false
+        diagnostics.record(DiagnosticEvent.PAUSED)
         if (::lab.isInitialized) lab.cancel()
         super.onPause()
     }
