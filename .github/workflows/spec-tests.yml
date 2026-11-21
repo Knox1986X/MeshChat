@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Test dependency-free Rust workspace
+      - name: Test locked Rust workspace with bundled SQLCipher
         run: python3 tools/ci_verify_rust.py
   android-lab:
     runs-on: ubuntu-24.04

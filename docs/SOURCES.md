@@ -32,3 +32,16 @@
 
 ## Кандидаты зависимостей, не blanket audit claim
 `zeroize`, `secrecy`, `uniffi`, `rusqlite`, SQLCipher Community, `tokio`, `snow`, RustCrypto AEAD/HKDF/ML-KEM реализации: выбирать точные версии после threat/API prototype, сохранять Cargo.lock/SPDX, проверять advisories и аудит **конкретной сборки**. MIT/Apache primitive implementation ≠ audited compositional protocol. Не подставлять искусственные version pins ради вида готового проекта.
+
+## Выбранные версии storage-прототипа
+
+Через GitHub Contents API проверены:
+- [rusqlite v0.37.0 Cargo.toml](https://github.com/rusqlite/rusqlite/blob/v0.37.0/Cargo.toml): MIT; существует feature `bundled-sqlcipher-vendored-openssl`. Именно эта feature используется в `crates/store`.
+- [zeroize v1.8.2 Cargo.toml](https://github.com/RustCrypto/utils/blob/zeroize-v1.8.2/zeroize/Cargo.toml): Apache-2.0 OR MIT; выбран `Zeroizing` без derive.
+
+Cargo.lock сформирован штатным Cargo в отдельном read-only CI, публичный metadata
+candidate проверен SHA256 и закоммичен; затем основной CI прошёл с `--locked`.
+Это не аудит зависимостей и не юридическое разрешение распространять production
+сборку без notices/SBOM. Bundled SQLCipher/OpenSSL/C toolchain тоже входят в
+supply-chain review; наличие MIT Rust wrapper не отменяет их лицензий и advisories.
+Точная проверенная сборка/evidence и границы памяти/FS — `PROGRESS.md`/`STORE.md`.
