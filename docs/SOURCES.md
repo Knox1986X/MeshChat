@@ -45,3 +45,11 @@ candidate проверен SHA256 и закоммичен; затем основ
 сборку без notices/SBOM. Bundled SQLCipher/OpenSSL/C toolchain тоже входят в
 supply-chain review; наличие MIT Rust wrapper не отменяет их лицензий и advisories.
 Точная проверенная сборка/evidence и границы памяти/FS — `PROGRESS.md`/`STORE.md`.
+
+
+## Native bridge prototype pins
+
+- [UniFFI0.29.4 manifest](https://github.com/mozilla/uniffi-rs/blob/v0.29.4/uniffi/Cargo.toml): MPL-2.0; runtime without default features, bindgen CLI feature explicit. [Kotlin object template](https://github.com/mozilla/uniffi-rs/blob/v0.29.4/uniffi_bindgen/src/bindings/kotlin/templates/ObjectTemplate.kt) reviewed for explicit `destroy()` and in-flight refcount behavior. Not a zeroization guarantee.
+- [JNA5.17.0](https://github.com/java-native-access/jna/tree/5.17.0), tag verified through GitHub API; Android AAR pinned5.17.0. Native binaries/transitive notices still need production SBOM/license/advisory review.
+- Android NDK27.2.12479018 pinned; Android API29 compiler targets, 16KiB maximum page-size linker flag. Flags alone do not prove all packaged libraries/OEM16KiB behavior.
+- AOSP emulator runner action pinned commit `a421e43855164a8197daf9d8d40fe71c6996bb0d`; SDK setup action pinned `9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407`. Emulator tests are not hardware attestation or biometric evidence.

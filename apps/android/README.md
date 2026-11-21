@@ -9,24 +9,27 @@ Android debug key сборочного runner; никакие production signing
 
 - Явно запустить создание временного аппаратного wrapping key.
 - Пройти два системных BiometricPrompt: wrap и unwrap случайного тестового key32.
-- Сравнение восстановленного ключа без отображения его в UI; plaintext ByteArray
+- Сравнение восстановленного ключа без отображения его в UI;
+  затем реальный UniFFI/SQLCipher create/lock/reopen пустой временной БД; plaintext ByteArray
   очищается best effort. В prefs/files/Bundle ключи и обёртки не сохраняются.
 - StrongBox требуется по умолчанию. TEE — только через отдельный AlertDialog и
   на один тест. Software fallback запрещён; отсутствие enrolled strong biometric
   приводит к отказу, не обходу аутентификации.
 - Уход из Activity (`onPause`), screen-off, timeout60s и кнопка отмены закрывают
   операцию/отменяют OS prompt; поздние callbacks отбрасываются. Нет фонового decrypt.
-- По завершении/отмене удаляется только alias, успешно созданный данным тестом.
+- По завершении/отмене отзывается Rust runtime, затем удаляются временные БД и только alias, успешно созданный данным тестом.
   Process kill/power loss может оставить orphan test alias; удаление/переустановка
   LAB-приложения очищает его. Это не гарантия crypto-shred всех OS copies.
 
 ## Сборка
 
-Нужны JDK17, Android SDK platform35/build-tools для AGP8.9.2, Gradle8.11.1.
+Нужны Linux x86_64, Rust/C build tools/Perl, JDK17, Android SDK platform35/build-tools для AGP8.9.2, Gradle8.11.1 и NDK27.2.12479018. `ANDROID_HOME` должен указывать SDK.
 Gradle wrapper и полная dependency verification/locking ещё не подготовлены —
 reproducible production release остаётся запрещён.
 
 ```
+# Из корня репозитория, до Gradle (generated outputs не коммитятся):
+python3 tools/build_android_native.py
 cd apps/android
 gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
 ```
@@ -43,13 +46,18 @@ GitHub позволяет выполнить проверку, которой з
 - 6 JVM unit-тестов `OperationGateTest`: одноразовость, stale/cross-gate callbacks,
   cancel/replace/exception cleanup, close terminal, poison on cleanup failure.
 - 5 instrumented `KeyProtectorContractTest`: operations/format на public synthetic
-  **software JCA** keys. CI пока только компилирует APK этих тестов, не запускает
-  их на телефоне. Запуск: `gradle :app:connectedDebugAndroidTest`.
+  **software JCA** keys. Добавлены3 `NativeVaultIntegrationTest` — настоящий
+  Kotlin/JNA/UniFFI/SQLCipher на public synthetic key: create/lock/reopen, stale
+  unlock, terminal shutdown. Новый CI требует выполнения на AOSP API30 x86_64
+  эмуляторе; run44895321204 прошёл,8 instrumented tests выполнены. Запуск:
+  `gradle :app:connectedDebugAndroidTest`.
 - BiometricPrompt, StrongBox/TEE, BFU/AFU, rotation/background/OEM и capture/backup
   требуют реальных устройств. Unit tests и lint это не доказывают.
 - `HardwareLabController` не полноценный vault lock manager. Главного encrypted
-  container, установки ключей в Rust core и отзыва UI/DB handles пока нет.
+  persistent user container, восстановления после crash, policy для orphan keys
+  и доказанного стирания всех key copies пока нет. Lifecycle Rust применяется
+  только к отдельному временному LAB-run.
 
 Контракт: `../../docs/KEY_PROTECTOR.md`. Следующие шаги: real-device hardware tests,
-production key lifecycle, SQLCipher/atomic outbox, reviewed crypto adapter и UniFFI.
+production key lifecycle, reviewed crypto adapter, доставка и persistent vault UI.
 Не вводите личные сообщения и не оценивайте безопасность переписки по LAB-тесту.

@@ -101,11 +101,32 @@ filesystem corruption. The acceptance plan's large fault campaign is still open.
 - SQLCipher WAL/CoW/VSS/backups can retain old encrypted state while a current DB
   key still decrypts it. `secure_delete=ON` is not forensic forward secrecy or SSD
   erasure. Per-generation external KEK destruction needs a separate design.
-- No hardware-bound installation manager or lock-time DB handle revocation yet.
+- No persistent hardware-bound installation manager. Revocable handle lifecycle is now in `vault`, with a narrow UniFFI LAB adapter; Android cross-build and AOSP instrumented tests passed (see exact evidence in `PROGRESS.md`).
 - No local DB schema migration, inbound atomic replay/decrypt, E2EE receipt cleanup,
   export/import or user deletion flow. No device multi-session network integration.
 - Bundled native/OpenSSL vulnerabilities, licenses/notices, reproducible Android
   cross-build and independent audit must be reviewed before any production APK.
 
 Current CI results and exact build commit are in `PROGRESS.md`. The existing LAB
-APK exercises only hardware wrapping, not this new Rust store.
+published milestone APK exercises only hardware wrapping. New native LAB builds are gated on actual Android bridge tests; do not attribute those capabilities to the old artifact.
+
+
+## Revocable lifecycle and FFI boundaries (prototype)
+
+`vault` serializes access through a mutex. A non-clone owner/generation-bound ticket
+is consumed once. Candidate DB open happens outside the gate; publication requires
+the still-current ticket. Lock revokes publication and closes the published store;
+shutdown is terminal. A stale in-flight candidate is closed on return, not instantly
+wiped while the underlying C open is running. Native operations are not arbitrary
+interruptible tasks. Lock may wait for an admitted short `with_store` operation.
+
+`ffi` only exposes LAB create/open, count, lock and shutdown. It consumes a Vec key
+into Zeroizing at the first Rust boundary. This does NOT wipe UniFFI serialization,
+JNA, JVM, rusqlite SQL strings or provider copies. Explicit shutdown and destroy are
+required; owner drop also revokes retained attempts. Object destruction alone is
+not a bounded-time process-memory erasure guarantee.
+
+Android uses a random private `noBackupFilesDir` subdirectory per ephemeral run.
+The binding, wrapped key and digest are RAM-only. Cancellation is terminal for that
+run; cleanup runs after pending native work, with visible failure if deletion fails.
+No real chat/ratchet data is exposed via FFI and no persistent vault unlock UX exists.

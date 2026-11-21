@@ -2,7 +2,55 @@
 
 Baseline: 2026-11-20. **Это LAB-прототип, не защищённый мессенджер.**
 
-## Выполнено
+## Текущий шаг: Rust lifecycle → реальный Android native bridge
+
+Код **`67f0e3c`**, [run44895321204](https://github.com/Knox1986X/MeshChat/actions/runs/44895321204):
+**все3 jobs success**. Проверено:
+
+|Проверка нового шага|Фактическое evidence|
+|---|---|
+|Rust workspace6 crates|`cargo test --workspace --locked --offline` и Clippy `-D warnings` success; в исходниках46 unit tests (vault12, FFI4)|
+|Native cross-build|arm64-v8a и x86_64 настоящие SQLCipher/Rust `.so`, Kotlin сгенерирован UniFFI; notice `Native LAB build`|
+|Android compile/JVM/lint|6 JVM tests, debug APK и instrumentation APK build, lint success|
+|AOSP API30 x86_64 emulator|8 instrumented tests реально выполнены:5 software-JCA contracts +3 Kotlin/JNA/UniFFI/SQLCipher lifecycle; failures/errors/skipped=0|
+|Python|11 tests; `header-format` success|
+|Физический телефон/StrongBox/TEE/BiometricPrompt|ЕЩЁ НЕ проверены; эмулятор это не доказывает|
+
+### Новый LAB APK — не production messenger
+
+[Скачать LAB ZIP](https://github.com/Knox1986X/MeshChat/actions/runs/44895321204/artifacts/14703887266)
+(14,486,398 bytes, retention7d, GitHub login может требоваться).
+Внутри `MeshChat-LAB.apk` и `LAB_WARNING.txt`. APK debug-signed временным runner key.
+
+- APK SHA256: `3b81c5242bfadb0728e3c49770cd6180cf5d5c8388c195d6870fb2542ec88c29`.
+- Artifact ZIP SHA256 из GitHub API: `b9483a10a86f32e58ea733003f83f88b1dbf97a7b623f8d07b17e89fff3dc3ac`.
+- Exact source: `67f0e3c0c04bbd1b04cce95c7124e7bd0df1eb73`.
+- APK не загружен локально из-за сетевой allowlist; SHA256/tests подтверждены
+  checks annotations/GitHub API, а не локальным запуском на телефоне.
+
+Добавлены `vault` и `ffi` (6 crates всего): одноразовые owner/generation-bound
+unlock tickets, блокировка/терминальный shutdown, закрытие опубликованной SQLCipher
+БД, отбрасывание позднего результата unlock, revocation при уничтожении FFI owner.
+UniFFI0.29.4 API не экспортирует plaintext сообщений, SQL или сам ключ.
+Cargo.lock обновлён штатным candidate Cargo; SHA256 публичного файла проверен.
+
+Android LAB теперь вызывает create → count → lock → отказ доступа → reopen → lock
+на временной пустой SQLCipher БД после двух hardware BiometricPrompt. На pause/cancel
+отзывается native runtime, очистка сериализована после native worker; удаляются
+временные файлы и созданный alias. Это НЕ persistent user vault. Cleanup — не forensic
+erasure, а key copies в JVM/JNA/UniFFI/native providers не имеют доказанного zeroization.
+In-flight SQLCipher open может временно удерживать ключ/handle после lock, но его
+результат не публикуется и не даёт доступ через API.
+
+CI теперь собирает реальные arm64-v8a/x86_64 `.so` (NDK27.2.12479018/API29),
+генерирует Kotlin и требует AOSP API30 x86_64 instrumented tests до выдачи нового
+APK artifact. Три native теста используют **публичный синтетический ключ**, без
+StrongBox/биометрии. Это не замена тестам на реальном телефоне.
+
+Далее после описания шага — **предыдущий полностью зелёный milestone**. Его APK НЕ содержит новых
+native-возможностей; не смешивать его SHA256/evidence с текущей разработкой.
+
+## Предыдущий milestone: выполнено
 
 1. Архитектура, threat matrix, Red Team, acceptance plan, local integration draft.
 2. Rust workspace (политики/парсер без dependencies; store использует pinned SQLCipher/Zeroize):
@@ -16,7 +64,7 @@ Baseline: 2026-11-20. **Это LAB-прототип, не защищённый �
 6. `BiometricCoordinator`/`OperationGate`: stale/cross-operation callbacks rejected; cancel на onPause/screen-off, monotonic timeout60s, destroy terminal. При cleanup exception gate poisoned. Отмена main-thread callbacks предшествует cancel OS signal. Creation/deletion и provider setup сериализованы на worker.
 7. Реальный GitHub Actions pipeline: Python checks, Rust tests+clippy, Kotlin compile+JVM tests+lint, debug APK и compile instrumented-test APK. Production signing keys не используются/не загружались. Нет production release.
 
-## Фактическое CI evidence
+## Предыдущий milestone: CI evidence
 
 Исходник: commit **`fbc30bd93d4ef919ec0abd9f58f7d59842aa20c6`** в текущей ветке.
 [GitHub Actions run44893599335](https://github.com/Knox1986X/MeshChat/actions/runs/44893599335) завершён **success** для всех3 jobs. Он использует уже закоммиченный Cargo.lock, `cargo fetch --locked`, затем offline tests/clippy; unlocked dependency candidate не считается release approval.
@@ -35,7 +83,7 @@ Baseline: 2026-11-20. **Это LAB-прототип, не защищённый �
 Первый CI run44891998358: Android прошёл, Rust упал; неоднозначность `Self::Error`
 исправлена и run44892385094 прошёл. При добавлении store кандидат упал из-за чтения
 SQLCipher pragma TEXT как INTEGER; строгий парсер обоих типов и проверка отсутствующих
-настроек исправлены. Последний run44893599335 полностью зелёный.
+настроек исправлены. Предыдущий полный milestone run44893599335 полностью зелёный.
 
 Тесты process death действительно завершают дочерний процесс между UPDATE/INSERT/
 COMMIT без Rust destructors, но **не имитируют физическое снятие питания/отказ SSD**.
@@ -45,7 +93,7 @@ GitHub checks/annotations получены через API; хранилище с
 использует домены вне allowlist Arena, поэтому raw logs/APK в sandbox не загружены.
 Не выдавать их отсутствие локально за отсутствие результата на GitHub.
 
-## Собранный LAB APK
+## Предыдущий milestone: устаревший hardware-only APK
 
 [Скачать artifact ZIP — MeshChat-LAB-not-a-messenger](https://github.com/Knox1986X/MeshChat/actions/runs/44893599335/artifacts/14702644758)
 
