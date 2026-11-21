@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/eco-envelope", "crates/session-policy", "crates/transport-policy", "crates/store"]
+members = ["crates/eco-envelope", "crates/session-policy", "crates/transport-policy", "crates/store", "crates/vault", "crates/ffi"]
 resolver = "2"
 
 [workspace.package]

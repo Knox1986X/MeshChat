@@ -85,6 +85,16 @@ pub struct Store {
 }
 
 impl Store {
+    /// Explicit close for a vault gate. Errors must prevent reopening/trust reuse.
+    pub fn close(self) -> Result<(), StoreError> {
+        self.connection.close().map_err(|_| StoreError::Database)
+    }
+
+    pub fn session_count(&self) -> Result<u64, StoreError> {
+        let count: i64 = self.connection.query_row("SELECT count(*) FROM sessions", [], |r| r.get(0))?;
+        u64::try_from(count).map_err(|_| StoreError::Database)
+    }
+
     /// Requires a private, owner-only directory; no attacker-writable parent paths.
     /// Failure leaves a file for explicit inspection/removal, never overwrites it.
     pub fn create_new(

@@ -1,0 +1,4 @@
+[bindings.kotlin]
+package_name = "org.meshchat.corelib"
+cdylib_name = "meshchat_ffi"
+android = true

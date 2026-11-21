@@ -1,0 +1,26 @@
+[package]
+name = "meshchat-ffi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+bindgen = ["uniffi/cli", "uniffi/cargo-metadata"]
+
+[[bin]]
+name = "meshchat-uniffi-bindgen"
+path = "src/bin/bindgen.rs"
+required-features = ["bindgen"]
+
+[dependencies]
+meshchat-store = { path = "../store" }
+meshchat-vault = { path = "../vault" }
+uniffi = { version = "=0.29.4", default-features = false }
+zeroize = "=1.8.2"
+
+[lints]
+workspace = true
