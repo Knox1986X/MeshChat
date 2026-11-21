@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import os
 import shutil
+import zipfile
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,13 +21,17 @@ def main():
     if tests < 6 or failures or errors or skipped:
         raise SystemExit('LAB unit tests missing, failed or skipped')
     apk = ROOT/'apps/android/app/build/outputs/apk/debug/app-debug.apk'
+    with zipfile.ZipFile(apk) as package:
+        for abi in ('arm64-v8a', 'x86_64'):
+            if f'lib/{abi}/libmeshchat_ffi.so' not in package.namelist():
+                raise SystemExit('Actual native Rust library missing for ' + abi)
     digest = hashlib.sha256(apk.read_bytes()).hexdigest()
     output = ROOT/'artifacts/lab'
     output.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(apk, output/'MeshChat-LAB.apk')
     (output/'LAB_WARNING.txt').write_text(
-        'MeshChat LAB: NOT A MESSENGER. No E2EE, chats, vault or network.\n'
-        'Ephemeral hardware wrap/unwrap experiment only. Debug-signed, not a production release.\n'
+        'MeshChat LAB: NOT A MESSENGER. No E2EE, chats, user vault or network.\n'
+        'Ephemeral hardware wrap/unwrap plus native Rust SQLCipher lifecycle experiment only. Debug-signed, not a production release.\n'
         'Do not enter personal data. Hardware behavior must be tested on a real device.\n'
         f'Build commit: {os.environ.get("GITHUB_SHA", "unknown")}\n'
         f'JVM unit tests passed: {tests} (not hardware instrumentation)\n'

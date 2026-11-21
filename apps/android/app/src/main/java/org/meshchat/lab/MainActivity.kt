@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
                         Text("MeshChat LAB", style = MaterialTheme.typography.headlineLarge)
                         Text("Это НЕ защищённый мессенджер. Сети, сообщений и хранилища нет.")
                         Text("Аппаратный тест", style = MaterialTheme.typography.titleLarge)
-                        Text("По нажатию создаётся временный тестовый hardware key. Два системных биометрических подтверждения проверяют wrap/unwrap случайных 32 байт; результат сразу очищается, alias удаляется по завершении/отмене. При аварийном завершении alias может остаться до удаления LAB-приложения.")
+                        Text("По нажатию создаётся временный тестовый hardware key. Два системных биометрических подтверждения проверяют wrap/unwrap случайных 32 байт; ключ передаётся в Rust SQLCipher через UniFFI для проверки create/lock/reopen, затем очищается; временные БД и alias удаляются по завершении/отмене. При аварийном завершении alias может остаться до удаления LAB-приложения.")
                         Button(enabled = resumed, onClick = {
                             lab.start(AndroidKeyProtector.EnrollmentPolicy.STRONGBOX_REQUIRED)
                         }) { Text("Создать временный ключ и проверить StrongBox") }
@@ -70,7 +70,7 @@ class MainActivity : ComponentActivity() {
                         Text("Ограничения", style = MaterialTheme.typography.titleLarge)
                         Text("Нужна настроенная сильная биометрия. PIN fallback не реализован. Отсутствие StrongBox не вызывает переход на TEE автоматически.")
                         Text("Блокировка экрана или уход из приложения отменяет тест. FLAG_SECURE не защищает от root, камеры или принуждения.")
-                        Text("Rust-политики и парсер пока не подключены через UniFFI. E2EE, база, доставка, TUF и production release ещё отсутствуют.")
+                        Text("Rust SQLCipher lifecycle подключён через UniFFI только к этому LAB-тесту. E2EE, переписка, доставка, TUF и production release ещё отсутствуют.")
                     }
                 }
                 if (confirmTee) {

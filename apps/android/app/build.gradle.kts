@@ -7,6 +7,11 @@ plugins {
 android {
     namespace = "org.meshchat.lab"
     compileSdk = 35
+    ndkVersion = "27.2.12479018"
+    sourceSets.getByName("main") {
+        java.srcDir("build/generated/uniffi")
+        jniLibs.srcDir("build/generated/native")
+    }
     defaultConfig {
         // Deliberately NOT the future production ecosystem identity.
         applicationId = "org.meshchat.lab"
@@ -41,4 +46,5 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("junit:junit:4.13.2")
     testImplementation("junit:junit:4.13.2")
+    implementation("net.java.dev.jna:jna:5.17.0@aar")
 }

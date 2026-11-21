@@ -23,7 +23,7 @@ jobs:
         run: python3 tools/ci_verify_rust.py
   android-lab:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -36,6 +36,10 @@ jobs:
         with:
           gradle-version: '8.11.1'
           cache-disabled: true
+      - name: Install pinned Android NDK
+        run: sdkmanager "ndk;27.2.12479018"
+      - name: Build actual Rust SQLCipher libraries and UniFFI Kotlin (no stubs)
+        run: python3 tools/build_android_native.py
       - name: Compile and test LAB only (no release signing)
         working-directory: apps/android
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest

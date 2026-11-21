@@ -96,3 +96,52 @@ impl Drop for UnlockAttempt {
         if let Some(ticket) = ticket { let _ = self.runtime.abandon(ticket); }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn directory() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("meshchat-ffi-{}-{}",
+            std::process::id(), std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir(&path).unwrap(); path
+    }
+    #[test]
+    fn exported_api_rejects_locked_stale_and_reused_attempts() {
+        let path = directory();
+        let vault = Vault::new(path.to_string_lossy().into_owned(), vec![1; 16]).unwrap();
+        assert!(matches!(vault.session_count(), Err(VaultError::Locked)));
+        let stale = vault.begin_unlock().unwrap(); vault.lock_vault().unwrap();
+        assert!(matches!(stale.create(vec![7; 32]), Err(VaultError::StaleUnlock)));
+        assert!(!path.join("vault.lab.db").exists());
+        let active = vault.begin_unlock().unwrap();
+        active.create(vec![7; 32]).unwrap();
+        assert_eq!(vault.session_count().unwrap(), 0);
+        assert!(matches!(active.create(vec![7; 32]), Err(VaultError::StaleUnlock)));
+        vault.lock_vault().unwrap();
+        let reopen = vault.begin_unlock().unwrap(); reopen.open_existing(vec![7; 32]).unwrap();
+        vault.shutdown().unwrap();
+        assert!(matches!(vault.begin_unlock(), Err(VaultError::Closed)));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn invalid_key_consumes_attempt_and_relocks_gate() {
+        let path = directory();
+        let vault = Vault::new(path.to_string_lossy().into_owned(), vec![1; 16]).unwrap();
+        let attempt = vault.begin_unlock().unwrap();
+        assert!(matches!(attempt.create(vec![7; 31]), Err(VaultError::InvalidInput)));
+        assert!(matches!(attempt.create(vec![7; 32]), Err(VaultError::StaleUnlock)));
+        assert_eq!(vault.runtime.state().unwrap(), meshchat_vault::VaultState::Locked);
+        assert!(!path.join("vault.lab.db").exists());
+        vault.shutdown().unwrap(); std::fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn dropping_unused_old_attempt_cannot_revoke_current_one() {
+        let path = directory();
+        let vault = Vault::new(path.to_string_lossy().into_owned(), vec![1; 16]).unwrap();
+        let old = vault.begin_unlock().unwrap(); let current = vault.begin_unlock().unwrap();
+        drop(old);
+        current.create(vec![7; 32]).unwrap();
+        vault.shutdown().unwrap(); std::fs::remove_dir_all(path).unwrap();
+    }
+}

@@ -6,6 +6,9 @@ import android.os.Looper
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.Executors
+import java.io.File
+import org.meshchat.corelib.Vault as NativeVault
+import org.meshchat.corelib.VaultException
 
 /**
  * Explicit LAB-only, ephemeral wrap/unwrap roundtrip. No personal data/persistence.
@@ -21,6 +24,8 @@ internal class HardwareLabController(
     private class Run(
         val protector: AndroidKeyProtector,
         val vaultId: ByteArray,
+        val core: NativeVault,
+        val directory: File,
         var wrapped: ByteArray? = null,
         var expectedDigest: ByteArray? = null,
         var createdByThisRun: Boolean = false, // Accessed only on serialized worker.
@@ -37,7 +42,24 @@ internal class HardwareLabController(
         check(!closed)
         cancel()
         val alias = "meshchat.lab.wrap.v1." + randomBytes(16).joinToString("") { "%02x".format(it.toInt() and 255) }
-        val run = Run(AndroidKeyProtector(alias), randomBytes(16))
+        val directory = File(activity.noBackupFilesDir, "native-lab-" + alias.substringAfterLast('.'))
+        if (!directory.mkdir()) {
+            report("Не удалось создать отдельную приватную папку LAB. Тест не запущен.")
+            return
+        }
+        val vaultId = randomBytes(16)
+        val core = try {
+            NativeVault(directory.canonicalPath, vaultId)
+        } catch (_: Exception) {
+            directory.delete()
+            report("Rust-хранилище недоступно. Программной подмены ядра нет.")
+            return
+        } catch (_: LinkageError) {
+            directory.delete()
+            report("Нативная библиотека не загрузилась. Тест остановлен без fallback.")
+            return
+        }
+        val run = Run(AndroidKeyProtector(alias), vaultId, core, directory)
         active = run
         deadline = Runnable { if (active === run) cancel() }.also { timeouts.postDelayed(it, 60000) }
         report("Создание временного hardware key…")
@@ -90,21 +112,66 @@ internal class HardwareLabController(
         report("Подтвердите unwrap. Восстановленный тестовый ключ сразу очищается.")
         prompts.authenticate(operation, operation.cryptoObject, onAuthenticated = {
             val key = operation.finishAfterAuthentication()
-            val digest = try {
-                MessageDigest.getInstance("SHA-256").digest(key)
+            try {
+                val digest = MessageDigest.getInstance("SHA-256").digest(key)
+                val matches = try {
+                    MessageDigest.isEqual(digest, checkNotNull(run.expectedDigest))
+                } finally {
+                    digest.fill(0)
+                }
+                if (matches) probeNativeStore(run, key.copyOf())
+                else fail(run, "Проверка roundtrip не пройдена.")
             } finally {
                 key.fill(0)
             }
-            val matches = try {
-                MessageDigest.isEqual(digest, checkNotNull(run.expectedDigest))
-            } finally {
-                digest.fill(0)
-            }
-            if (matches) finish(run, "Hardware roundtrip выполнен. Удаление временного ключа…")
-            else fail(run, "Проверка roundtrip не пройдена.")
         }, onFailure = {
             fail(run, "Unwrap отменён или недоступен.")
         })
+    }
+
+    /** Owns keyCopy; never reports native error text or returns a plaintext key. */
+    private fun probeNativeStore(run: Run, keyCopy: ByteArray) {
+        val attempt = try {
+            require(keyCopy.size == 32)
+            run.core.beginUnlock()
+        } catch (_: Exception) {
+            keyCopy.fill(0)
+            fail(run, "Rust gate не разрешил открытие хранилища.")
+            return
+        }
+        report("Hardware roundtrip выполнен. Проверяется Rust SQLCipher через UniFFI…")
+        worker.execute {
+            try {
+                attempt.create(keyCopy)
+                check(run.core.sessionCount() == 0uL)
+                run.core.lockVault()
+                val blocked = try {
+                    run.core.sessionCount()
+                    false
+                } catch (_: VaultException.Locked) {
+                    true
+                }
+                check(blocked)
+                val reopen = run.core.beginUnlock()
+                try {
+                    reopen.openExisting(keyCopy)
+                    check(run.core.sessionCount() == 0uL)
+                } finally {
+                    reopen.destroy()
+                }
+                run.core.lockVault()
+                activity.runOnUiThread {
+                    if (active === run && !closed) {
+                        finish(run, "Hardware + Rust SQLCipher roundtrip выполнен; lock блокирует доступ. Удаление временных данных…")
+                    }
+                }
+            } catch (_: Exception) {
+                activity.runOnUiThread { fail(run, "Rust SQLCipher тест остановлен; ключ/БД не пересоздаются автоматически.") }
+            } finally {
+                keyCopy.fill(0)
+                attempt.destroy()
+            }
+        }
     }
 
     private fun fail(run: Run, message: String) {
@@ -127,7 +194,13 @@ internal class HardwareLabController(
         clearDeadline()
         prompts.cancel()
         if (run != null) {
-            report("Тест остановлен; временный ключ будет удалён.")
+            // Terminal for this run: worker must not start a fresh unlock after cancel.
+            try {
+                run.core.shutdown()
+                report("Доступ Rust отозван; ожидается очистка временных данных.")
+            } catch (_: Exception) {
+                report("Ошибка закрытия Rust: тест заблокирован; выполняется очистка.")
+            }
             cleanup(run)
         }
     }
@@ -135,6 +208,22 @@ internal class HardwareLabController(
     private fun cleanup(run: Run) {
         worker.execute {
             var removed = true
+            try {
+                run.core.shutdown()
+            } catch (_: Exception) {
+                removed = false
+            } finally {
+                try { run.core.destroy() } catch (_: Exception) { removed = false }
+            }
+            try {
+                for (suffix in listOf("", "-wal", "-shm", "-journal")) {
+                    val file = File(run.directory, "vault.lab.db" + suffix)
+                    if (file.exists() && !file.delete()) removed = false
+                }
+                if (!run.directory.delete()) removed = false
+            } catch (_: Exception) {
+                removed = false
+            }
             try {
                 // Never delete a pre-existing alias after ALIAS_EXISTS or creation failure.
                 if (run.createdByThisRun) {
