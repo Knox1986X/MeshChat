@@ -32,8 +32,9 @@ def main():
                 print('::error title=Synthetic device test failure::' + annotation(
                     case.get('name', '') + ': ' + failure.get('message', '') + '\n' + (failure.text or '')))
     expected = {'org.meshchat.lab.security.NativeVaultIntegrationTest',
-                'org.meshchat.lab.security.KeyProtectorContractTest'}
-    if result.returncode or tests < 8 or failures or errors or skipped or not expected <= classes:
+                'org.meshchat.lab.security.KeyProtectorContractTest',
+                'org.meshchat.lab.security.EnrollmentRepositoryTest'}
+    if result.returncode or tests < 15 or failures or errors or skipped or not expected <= classes:
         print('::error title=Emulator verification failed::' + annotation(result.stdout[-2800:]))
         return result.returncode or 1
     print(f'::notice title=AOSP emulator tests::Passed {tests} instrumented tests, including Kotlin JNA UniFFI SQLCipher. No StrongBox or biometric hardware claim.')
