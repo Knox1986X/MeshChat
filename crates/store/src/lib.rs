@@ -162,8 +162,14 @@ impl Store {
              PRAGMA foreign_keys=ON; PRAGMA secure_delete=ON; PRAGMA synchronous=FULL;",
         )?;
         let journal: String = connection.query_row("PRAGMA journal_mode=WAL", [], |r| r.get(0))?;
-        let memory: i64 = connection.query_row("PRAGMA cipher_memory_security", [], |r| r.get(0))?;
-        if journal.to_lowercase() != "wal" || memory != 1 {
+        let memory = integer_setting(&connection, "PRAGMA cipher_memory_security")?;
+        let hmac = integer_setting(&connection, "PRAGMA cipher_use_hmac")?;
+        let sync = integer_setting(&connection, "PRAGMA synchronous")?;
+        let temp = integer_setting(&connection, "PRAGMA temp_store")?;
+        let foreign_keys = integer_setting(&connection, "PRAGMA foreign_keys")?;
+        if journal.to_lowercase() != "wal" || memory != 1 || hmac != 1 || sync != 2
+            || temp != 2 || foreign_keys != 1
+        {
             return Err(StoreError::CipherRequired);
         }
         Ok(Self { connection })
@@ -310,6 +316,20 @@ impl Store {
     }
 }
 
+// SQLCipher pragmas may return TEXT "1" while SQLite pragmas return INTEGER 1.
+// Both are parsed strictly, with no fallback/default if the pragma is missing.
+fn integer_setting(connection: &Connection, sql: &'static str) -> Result<i64, StoreError> {
+    Ok(connection.query_row(sql, [], |row| {
+        match row.get_ref(0)? {
+            rusqlite::types::ValueRef::Integer(value) => Ok(value),
+            rusqlite::types::ValueRef::Text(bytes) => std::str::from_utf8(bytes)
+                .ok().and_then(|text| text.parse::<i64>().ok())
+                .ok_or(rusqlite::Error::InvalidQuery),
+            _ => Err(rusqlite::Error::InvalidQuery),
+        }
+    })?)
+}
+
 #[derive(Clone, Copy)]
 enum Checkpoint { StateUpdated, OutboxInserted, Committed }
 
@@ -319,7 +339,7 @@ CREATE TABLE installation(
  schema_version INTEGER NOT NULL CHECK(schema_version=1), binding BLOB NOT NULL CHECK(length(binding)=16)
 );
 CREATE TABLE sessions(
- id BLOB PRIMARY KEY CHECK(length(id)=16), revision INTEGER NOT NULL CHECK(revision>=0),
+ id BLOB PRIMARY KEY NOT NULL CHECK(length(id)=16), revision INTEGER NOT NULL CHECK(revision>=0),
  ratchet BLOB NOT NULL CHECK(length(ratchet) BETWEEN 1 AND 65536)
 );
 CREATE TABLE outbox(

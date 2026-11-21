@@ -218,3 +218,34 @@ fn process_death_before_commit_rolls_back_and_after_commit_preserves_retry() {
         }
     }
 }
+
+#[test]
+fn concurrent_writers_cannot_advance_same_revision_twice() {
+    let temp = Temp::new();
+    let first = initialized(&temp);
+    let second = temp.reopen();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let handles: Vec<_> = [first, second].into_iter().enumerate().map(|(n, mut store)| {
+        let barrier = barrier.clone();
+        std::thread::spawn(move || {
+            barrier.wait();
+            store.commit_send(SESSION, 0, state(b"next-concurrent"), MessageId([n as u8; 16]), cell())
+        })
+    }).collect();
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert_eq!(results.iter().filter(|r| **r == Err(StoreError::RevisionConflict)).count(), 1);
+    let store = temp.reopen();
+    assert_eq!(store.load_session(SESSION).unwrap().0, 1);
+    assert_eq!(store.pending(SESSION).unwrap().len(), 1);
+}
+
+#[test]
+fn settings_accept_integer_or_numeric_text_but_never_default_on_missing() {
+    let temp = Temp::new();
+    let store = temp.create();
+    assert_eq!(integer_setting(&store.connection, "SELECT 1"), Ok(1));
+    assert_eq!(integer_setting(&store.connection, "SELECT '1'"), Ok(1));
+    assert!(integer_setting(&store.connection, "SELECT 'not-a-number'").is_err());
+    assert!(integer_setting(&store.connection, "PRAGMA nonexistent_meshchat_setting").is_err());
+}
