@@ -1,6 +1,8 @@
 package org.meshchat.lab.security
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.concurrent.Executors
@@ -21,8 +23,11 @@ internal class HardwareLabController(
         val vaultId: ByteArray,
         var wrapped: ByteArray? = null,
         var expectedDigest: ByteArray? = null,
+        var createdByThisRun: Boolean = false, // Accessed only on serialized worker.
     )
     private val worker = Executors.newSingleThreadExecutor()
+    private val timeouts = Handler(Looper.getMainLooper())
+    private var deadline: Runnable? = null
     private val prompts = BiometricCoordinator(activity, ownerIsResumed)
     private val random = SecureRandom()
     private var active: Run? = null
@@ -34,10 +39,12 @@ internal class HardwareLabController(
         val alias = "meshchat.lab.wrap.v1." + randomBytes(16).joinToString("") { "%02x".format(it.toInt() and 255) }
         val run = Run(AndroidKeyProtector(alias), randomBytes(16))
         active = run
+        deadline = Runnable { if (active === run) cancel() }.also { timeouts.postDelayed(it, 60000) }
         report("Создание временного hardware key…")
         worker.execute {
             try {
                 val level = run.protector.create(policy)
+                run.createdByThisRun = true
                 val operation = run.protector.beginWrap(run.vaultId)
                 activity.runOnUiThread {
                     if (active !== run || closed) {
@@ -108,6 +115,7 @@ internal class HardwareLabController(
     private fun finish(run: Run, message: String) {
         if (active !== run) return
         active = null
+        clearDeadline()
         prompts.cancel()
         report(message)
         cleanup(run)
@@ -116,6 +124,7 @@ internal class HardwareLabController(
     fun cancel() {
         val run = active
         active = null // Invalidate result delivery BEFORE cancelling the OS prompt.
+        clearDeadline()
         prompts.cancel()
         if (run != null) {
             report("Тест остановлен; временный ключ будет удалён.")
@@ -127,8 +136,11 @@ internal class HardwareLabController(
         worker.execute {
             var removed = true
             try {
-                // The only keys managed here are created for this explicit LAB run.
-                run.protector.deleteAfterExplicitUserDecision()
+                // Never delete a pre-existing alias after ALIAS_EXISTS or creation failure.
+                if (run.createdByThisRun) {
+                    run.protector.deleteAfterExplicitUserDecision()
+                    run.createdByThisRun = false
+                }
             } catch (_: Exception) {
                 removed = false
             } finally {
@@ -149,6 +161,11 @@ internal class HardwareLabController(
         prompts.close()
         // Queued cleanup completes; never block Activity/main thread on awaitTermination.
         worker.shutdown()
+    }
+
+    private fun clearDeadline() {
+        deadline?.let(timeouts::removeCallbacks)
+        deadline = null
     }
 
     private fun randomBytes(size: Int): ByteArray = ByteArray(size).also(random::nextBytes)

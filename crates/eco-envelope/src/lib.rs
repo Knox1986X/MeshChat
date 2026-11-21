@@ -41,7 +41,7 @@ pub enum PayloadType {
 
 impl TryFrom<u16> for PayloadType {
     type Error = ParseError;
-    fn try_from(value: u16) -> Result<Self, Self::Error> {
+    fn try_from(value: u16) -> Result<Self, ParseError> {
         match value {
             1 => Ok(Self::GrantRequest),
             2 => Ok(Self::GrantResult),

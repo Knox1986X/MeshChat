@@ -20,9 +20,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Test dependency-free Rust workspace
-        run: |
-          cargo test --workspace --locked --offline
-          cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+        run: python3 tools/ci_verify_rust.py
   android-lab:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -41,9 +39,11 @@ jobs:
       - name: Compile and test LAB only (no release signing)
         working-directory: apps/android
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Report tests and package LAB warning with APK
+        run: python3 tools/ci_android_report.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: MeshChat-LAB-not-a-messenger
-          path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          path: artifacts/lab/
           if-no-files-found: error
           retention-days: 7
