@@ -76,3 +76,13 @@ production key lifecycle, reviewed crypto adapter, доставка и persisten
 run44902408154 прошёл:9 JVM tests (3 теста ring buffer/clear/concurrency добавлены),
 8 AOSP instrumented tests. Экран экспорта/picker и hardware flow вручную на физическом
 устройстве ещё не проверены. Это диагностический LAB, не бета готовой переписки.
+
+
+## Persistent enrollment prerequisite
+
+`vault/EnrollmentRecord` и `EnrollmentRepository` сохраняют этапы RESERVED → WRAPPED
+→ READY, policy, binding и wrapper без plaintext DB key. AtomicFile + file lock,
+strict bounded parser, ошибки/остатки прерванной записи не разрешают automatic reset.
+run44910392177:13 JVM tests +15 AOSP instrumented tests прошли. **К экрану hardware
+vault ещё не подключено**; текущий UI всё ещё ephemeral LAB. Контракт и остаточные
+блокеры: [VAULT_ENROLLMENT.md](../../docs/VAULT_ENROLLMENT.md).

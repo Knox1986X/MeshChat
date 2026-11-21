@@ -2,6 +2,38 @@
 
 Baseline: 2026-11-20. **Это LAB-прототип, не защищённый мессенджер.**
 
+## Следующий шаг: staged persistent enrollment metadata
+
+Код **`7c517d64e07a72d7193280d9f22768269ee6d167`**,
+[run44910392177](https://github.com/Knox1986X/MeshChat/actions/runs/44910392177):
+**все3 jobs success**. Rust tests/Clippy, Python11, native arm64-v8a/x86_64,
+Android compile/lint, **13 JVM tests и15 реально выполненных AOSP instrumented tests**.
+
+Добавлены строгая versioned запись RESERVED → WRAPPED → READY и repository с
+file lock/AtomicFile, bounded read-back и запретом automatic reset/overwrite.
+Interrupted enrollment, orphan DB, несовпадающая binding, повреждённая запись,
+`.new`/`.bak` и отсутствующая READY DB не превращаются в разрешение создать новый ключ.
+Запись хранит binding/policy/wrapped-key envelope, **не plaintext DB key**.
+READY — structural status, а не доказательство Keystore/SQLCipher authentication.
+
+Новые4 JVM tests проверяют формат/границы/переходы/copies;7 AOSP tests — настоящий
+SQLCipher create/close → metadata READY → новые repository/native owners → open,
+обрывы этапов, orphan DB preservation, неправильную binding, oversized/corrupt
+records, atomic leftovers, запрет повторной записи wrapper. Только synthetic keys.
+Это моделирование restart новыми объектами, **не убийство процесса/power-loss campaign**.
+
+**К экрану постоянного hardware vault пока НЕ подключено.** Экран и diagnostic
+export остаются LAB; новая схема не заменяет биометрию/unwrap, persistent enrollment
+controller, recovery UI, key invalidation handling, anti-rollback и реальный аудит.
+[Контракт, порядок будущего подключения и ограничения](VAULT_ENROLLMENT.md).
+
+Artifact для этого source (UI без новых функций vault):
+[LAB ZIP](https://github.com/Knox1986X/MeshChat/actions/runs/44910392177/artifacts/14709857390),
+14,505,828 bytes, retention7d, debug-signed.
+APK SHA256: `cad74ae735efe23504264361540b3ca48cee3fb97e640d8e50388c318cdb6074`.
+ZIP SHA256 GitHub API: `b780e295ce46f5d244eb9b5c50cdc39f65ff2e42410db3b275402b3288c305d1`.
+Evidence через API/checks; APK локально не скачан из-за allowlist.
+
 ## Новая диагностическая сборка для тестировщика
 
 Код **`06da5e7a9dea0008c3069b6c2a5eb510bc09fbfd`**,
