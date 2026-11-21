@@ -13,6 +13,7 @@ def escape(text):
 
 def main():
     commands = [
+        ['cargo', 'fetch', '--locked'],
         ['cargo', 'test', '--workspace', '--locked', '--offline'],
         ['cargo', 'clippy', '--workspace', '--all-targets', '--locked', '--offline',
          '--', '-D', 'warnings'],

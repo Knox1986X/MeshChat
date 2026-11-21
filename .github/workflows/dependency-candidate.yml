@@ -1,0 +1,19 @@
+name: Public dependency lock candidate (not release approval)
+on:
+  push:
+    paths:
+      - Cargo.toml
+      - crates/**/Cargo.toml
+      - tools/ci_lock_candidate.py
+permissions:
+  contents: read
+jobs:
+  resolve-public-lock:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Export public Cargo.lock candidate without running application code
+        run: python3 tools/ci_lock_candidate.py
