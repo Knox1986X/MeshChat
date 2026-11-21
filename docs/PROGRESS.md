@@ -2,6 +2,34 @@
 
 Baseline: 2026-11-20. **Это LAB-прототип, не защищённый мессенджер.**
 
+## Новая диагностическая сборка для тестировщика
+
+Код **`06da5e7a9dea0008c3069b6c2a5eb510bc09fbfd`**,
+[run44902408154](https://github.com/Knox1986X/MeshChat/actions/runs/44902408154):
+**все3 jobs success**. Rust tests/Clippy, Python11, native arm64-v8a/x86_64,
+Android compile/lint, **9 JVM tests** (включая3 DiagnosticLogTest) и **8 реально
+выполненных instrumented tests на AOSP API30 x86_64**. Последние8 не включают
+UI/системный picker: ручной экспорт и hardware flow нужно проверить на телефоне.
+
+Добавлены просмотр, очистка и явный экспорт `.txt` через системный CreateDocument.
+Лог принимает только enum allowlist;256 событий в RAM, без ключей, alias, путей,
+сообщений, exception text, stack traces, идентификаторов телефона или сети.
+Отчёт содержит version/source revision/Android API. Автоотправки/INTERNET нет.
+После process death/пересоздания Activity журнал теряется; crash/ANR сбор пока
+не реализован. Экспортированный файл вне контроля LAB, удаляется отдельно.
+
+[Скачать ZIP с диагностическим LAB APK](https://github.com/Knox1986X/MeshChat/actions/runs/44902408154/artifacts/14706956141)
+(14,499,662 bytes; retention7d, может требоваться GitHub login).
+
+- APK SHA256: `6449337b2caa0f97bb56505010ed0c98b36eaa0cc4751478f740ba67c3f7c895`.
+- ZIP SHA256 GitHub API: `4319f17f68c2c30ef48241ca7cd11ebcbf8dbb92c53ffd359199a3d6abfd4d6d`.
+- Внутри `MeshChat-LAB.apk` и `LAB_WARNING.txt`; debug-signed, не production.
+- [Как тестировать и прислать отчёт](BETA_TESTING.md).
+- Это подготовка к бете, **не полноценная бета мессенджера**: переписки/E2EE/сети нет.
+
+SHA256/test evidence получено через checks/API; локально APK не скачан из-за
+сетевой allowlist. Ниже сохранены предыдущие milestones с их собственными hashes.
+
 ## Текущий шаг: Rust lifecycle → реальный Android native bridge
 
 Код **`67f0e3c`**, [run44895321204](https://github.com/Knox1986X/MeshChat/actions/runs/44895321204):

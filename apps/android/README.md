@@ -61,3 +61,18 @@ GitHub позволяет выполнить проверку, которой з
 Контракт: `../../docs/KEY_PROTECTOR.md`. Следующие шаги: real-device hardware tests,
 production key lifecycle, reviewed crypto adapter, доставка и persistent vault UI.
 Не вводите личные сообщения и не оценивайте безопасность переписки по LAB-тесту.
+
+
+## Диагностическая сборка для тестировщика
+
+Кнопки «Просмотреть и экспортировать отчёт» и «Очистить журнал». Только allowlisted
+коды этапов/ошибок, source revision/version/Android API;256 событий в RAM, без
+автоматической отправки. Никакого полного logcat/bugreport. После завершения процесса
+или пересоздания Activity события теряются. Сохранение `.txt` через системный picker
+только по явному решению; облачный провайдер может загрузить выбранный файл.
+
+[Инструкция и сценарии](../../docs/BETA_TESTING.md),
+[свежий APK/точное evidence](../../docs/PROGRESS.md).
+run44902408154 прошёл:9 JVM tests (3 теста ring buffer/clear/concurrency добавлены),
+8 AOSP instrumented tests. Экран экспорта/picker и hardware flow вручную на физическом
+устройстве ещё не проверены. Это диагностический LAB, не бета готовой переписки.
