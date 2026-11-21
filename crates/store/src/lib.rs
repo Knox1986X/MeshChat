@@ -255,11 +255,21 @@ impl Store {
 
     /// Bounded batch; caller must check contact/vault/route/PQ policy before send.
     pub fn pending(&self, session: SessionId) -> Result<Vec<PendingMessage>, StoreError> {
+        self.pending_after(session, 0)
+    }
+
+    /// Scheduler cursor is local only. It isn't a receipt and never deletes data.
+    pub fn pending_after(
+        &self,
+        session: SessionId,
+        after_revision: u64,
+    ) -> Result<Vec<PendingMessage>, StoreError> {
+        let cursor = i64::try_from(after_revision).map_err(|_| StoreError::RevisionExhausted)?;
         let mut statement = self.connection.prepare(
             "SELECT message_id,committed_revision,cell,stage FROM outbox
-             WHERE session_id=?1 ORDER BY committed_revision LIMIT 32",
+             WHERE session_id=?1 AND committed_revision>?2 ORDER BY committed_revision LIMIT 32",
         )?;
-        let mut rows = statement.query(params![&session.0[..]])?;
+        let mut rows = statement.query(params![&session.0[..], cursor])?;
         let mut output = Vec::new();
         while let Some(row) = rows.next()? {
             let id: Vec<u8> = row.get(0)?;

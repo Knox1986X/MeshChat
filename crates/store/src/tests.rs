@@ -153,6 +153,10 @@ fn pending_batches_are_bounded_and_sessions_are_isolated() {
     // Same message ID across isolated sessions isn't a global public identifier.
     store.commit_send(second, 0, state(b"second-next"), MessageId([0; 16]), cell()).unwrap();
     assert_eq!(store.pending(SESSION).unwrap().len(), 32);
+    let remaining = store.pending_after(SESSION, 32).unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].committed_revision, 33);
+    assert!(store.pending_after(SESSION, 33).unwrap().is_empty());
     assert_eq!(store.pending(second).unwrap().len(), 1);
     assert_eq!(store.load_session(second).unwrap().0, 1);
 }

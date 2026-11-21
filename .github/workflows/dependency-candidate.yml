@@ -17,3 +17,5 @@ jobs:
           persist-credentials: false
       - name: Export public Cargo.lock candidate without running application code
         run: python3 tools/ci_lock_candidate.py
+      - name: Test candidate (does not replace committed-lock approval)
+        run: python3 tools/ci_verify_rust.py
