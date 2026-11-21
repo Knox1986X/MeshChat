@@ -43,6 +43,17 @@ jobs:
       - name: Compile and test LAB only (no release signing)
         working-directory: apps/android
         run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM for synthetic AOSP instrumented tests
+        run: sudo chmod a+rw /dev/kvm
+      - name: Execute synthetic native bridge tests on AOSP (no Google services)
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: python3 tools/ci_android_device_tests.py
       - name: Report tests and package LAB warning with APK
         run: python3 tools/ci_android_report.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
